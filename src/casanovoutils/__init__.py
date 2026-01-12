@@ -3,13 +3,17 @@ import random
 import itertools
 import pathlib
 import shutil
+import os
 from os import PathLike
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, List, Dict
+from collections import defaultdict
 
 import numpy as np
 import tqdm
 import fire
 import pyteomics.mgf
+import logging
+import re
 import pyteomics.mztab
 import matplotlib.pyplot as plt
 import casanovo.denovo.evaluate
@@ -291,6 +295,127 @@ class GraphPrecCov:
         """
         self.fig.show()
 
+@dataclasses.dataclass 
+class TrainTestValidationSplitting: 
+    """
+    Split MGF files by peptide sequence into train/test/val sets.
+
+    This script recursively finds all MGF files in an input directory, groups
+    spectra by peptide sequence, splits peptides into train/test/val sets, and
+    writes the corresponding spectra to separate output MGF files.
+    """
+    random_seed: int | float = 42
+
+    def find_mgf_files(
+        input_dir: pathlib.Path
+    ) -> Iterable[pathlib.Path]:
+        """
+        Recursively find all MGF files in a directory.
+        
+        Parameters
+        ----------
+        input_dir : pathlib.Path
+            Root directory to search
+            
+        Returns
+        -------
+        List[pathlib.Path]
+            List of paths to MGF files
+        """
+        mgf_files = Iterable(input_dir.rglob("*.mgf"))
+        return mgf_files
+
+    def split_peptides(
+        self,
+        peptides: List[str],
+        train_ratio: float = 0.8,
+        val_ratio: float = 0.1,
+        test_ratio: float = 0.1,
+    ) -> tuple[List[str], List[str], List[str]]:
+        """
+        Split peptide sequences into train/val/test sets.
+        
+        Parameters
+        ----------
+        peptides : List[str]
+            List of unique peptide sequences
+        train_ratio : float
+            Fraction of peptides for training set
+        val_ratio : float
+            Fraction of peptides for validation set
+        test_ratio : float
+            Fraction of peptides for test set
+        random_seed : int
+            Random seed for reproducibility
+            
+        Returns
+        -------
+        tuple[List[str], List[str], List[str]]
+            (train_peptides, val_peptides, test_peptides)
+        """
+        rng = np.random.default_rng(self.random_seed)
+        peptides = list(peptides)
+        rng.shuffle(peptides)
+        
+        n = len(peptides)
+        train_end = int(n * train_ratio)
+        val_end = train_end + int(n * val_ratio)
+        
+        train_peptides = peptides[:train_end]
+        val_peptides = peptides[train_end:val_end]
+        test_peptides = peptides[val_end:]
+        
+        return train_peptides, val_peptides, test_peptides
+
+
+    def write_split_mgf(
+        peptide_dict: Dict[str, List[Dict[str, Any]]],
+        peptide_list: List[str],
+        output_path: pathlib.Path
+    ) -> None:
+        """
+        Write spectra for a list of peptides to an MGF file.
+        
+        Parameters
+        ----------
+        peptide_dict : Dict[str, List[Dict[str, Any]]]
+            Dictionary mapping peptides to their spectra
+        peptide_list : List[str]
+            List of peptides to include in this split
+        output_path : pathlib.Path
+            Output MGF file path
+        """
+        spectra = []
+        for peptide in peptide_list:
+            spectra.extend(peptide_dict[peptide])
+        
+        print(f"Writing {len(spectra)} spectra to {output_path}")
+        pyteomics.mgf.write(spectra, str(output_path))
+
+
+    def split(
+        self,
+        input_dir: PathLike, 
+        output_dir: PathLike, 
+        train_ratio: float, 
+        test_ratio: float, 
+        val_ratio: float,
+    ):
+        os.mkdir(output_dir)
+        
+        mgf_files = self.find_mgf_files(input_dir)
+        peptide_dict = get_pep_dict_mgf(mgf_files)
+        
+        train_peptides, val_peptides, test_peptides = self.split_peptides(
+            list(peptide_dict.keys()),
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+        )
+        
+        self.write_split_mgf(peptide_dict, train_peptides, output_dir / "train")
+        self.write_split_mgf(peptide_dict, val_peptides, output_dir / "val")
+        self.write_split_mgf(peptide_dict, test_peptides, output_dir / "test")
 
 @dataclasses.dataclass
 class DownsampleMS:
@@ -567,5 +692,6 @@ def main() -> None:
             "downsample-ms": DownsampleMS,
             "dump-residues": dump_residues,
             "graph-prec-cov": GraphPrecCov,
+            "train/test/validation-split": TrainTestValidationSplitting,
         }
     )
