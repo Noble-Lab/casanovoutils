@@ -43,7 +43,10 @@ def get_pep_dict_mgf(mgf_files: Iterable[PathLike]) -> dict[str, list[dict[str, 
 
 
 def prec_cov(
-    scores: np.ndarray, is_correct: np.ndarray
+    scores: np.ndarray,
+    is_correct: np.ndarray,
+    peptides_pred,
+    peptides_true,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Compute the precision-coverage curve and its area-under-curve (AUPC) for a
@@ -77,6 +80,20 @@ def prec_cov(
 
     precision = total_precision / total_coverage
     coverage = total_coverage / total_coverage[-1]
+
+    pd.DataFrame(
+        {
+            "is-correct": is_correct,
+            "scores": scores[sort_idx],
+            "precision": precision,
+            "coverage": coverage,
+            "peptides-pred": peptides_pred,
+            "peptides-true": peptides_true,
+        }
+    ).to_csv(
+        "/net/noble/vol1/home/gstrau2/proj/casanovo_isoleucine/results/2026-01-22/fig-one/debug.csv"
+    )
+
     aupc = np.trapz(precision, coverage)
     return precision, coverage, aupc
 
@@ -200,7 +217,9 @@ def get_aa_matches(
     else:
         ground_truth = []
         with open(ground_truth_mgf) as f:
-            for line in tqdm.tqdm(f, desc=f"Reading mgf file: {ground_truth_mgf}", unit="lines"):
+            for line in tqdm.tqdm(
+                f, desc=f"Reading mgf file: {ground_truth_mgf}", unit="lines"
+            ):
                 if line.startswith("SEQ="):
                     ground_truth.append(line.removeprefix("SEQ=").strip())
 

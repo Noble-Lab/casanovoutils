@@ -8,7 +8,8 @@ import fire
 import tqdm
 import pyteomics.mgf
 
-from ..casanovoutils import get_pep_dict_mgf
+from . import get_pep_dict_mgf
+
 
 @dataclasses.dataclass
 class DownsampleMS:
@@ -67,9 +68,11 @@ class DownsampleMS:
             tqdm.tqdm(spectra, desc=f"Writing output file {outfile}", unit="psm")
         )
 
+
 def main() -> None:
     """CLI entry"""
     fire.Fire(DownsampleMS)
+
 
 if __name__ == "__main__":
     main()
