@@ -19,7 +19,9 @@ dependencies = [
 ]
 
 [project.scripts]
-casanovoutils = "casanovoutils:main"
+casanovo-utils = "casanovoutils:main"
+downsample-ms = "casanovoutils.downsamplems:main"
+graph-prec-cov = "casanovoutils.preccov:main"
 
 [build-system]
 requires = ["hatchling"]

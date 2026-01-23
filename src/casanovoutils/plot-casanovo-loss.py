@@ -10,11 +10,12 @@ Output is written to `<root>.png`.
 
 from __future__ import annotations
 
-import argparse
 import csv
+import dataclasses
 import math
 import re
 import sys
+from os import PathLike
 from pathlib import Path
 from typing import Sequence, TypeAlias
 
@@ -248,73 +249,150 @@ def plot_losses(
     plt.close(fig)
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        prog="plot-casanovo-loss.py",
-        description=(
-            "Read Casanovo log and/or metrics.csv files and plot training and "
-            "validation loss."
-        ),
-    )
-    parser.add_argument(
-        "root",
-        help="Output file root; plot will be written to <root>.png",
-    )
-    parser.add_argument(
-        "inputs",
-        nargs="+",
-        type=existing_file,
-        help="One or more input files (log files or metrics.csv files)",
-    )
-    parser.add_argument(
-        "--max-y",
-        type=float,
-        default=None,
-        help="Optional y-axis maximum",
-    )
-    return parser.parse_args(argv)
+
+@dataclasses.dataclass
+class GraphCasanovoLoss:
+    """Plot Casanovo training and validation loss.
+
+    The plotting logic is wrapped in a dataclass so it can be used either:
+
+    * from the command line via ``fire``
+    * directly from Python (e.g. scripts or Jupyter notebooks)
+
+    Notes
+    -----
+    Losses can be collected from one or more Casanovo training outputs. Each
+    input may be either a training log (``*.log``) or a ``metrics.csv`` file.
+
+    Examples
+    --------
+    CLI (via fire)::
+
+        plot-casanovo-loss.py plot run1 training.log --max_y=2.0
+        plot-casanovo-loss.py plot run1 metrics.csv training.log
+
+    Python::
+
+        g = GraphCasanovoLoss()
+        g.add_csv_file("metrics.csv")
+        g.add_log_file("training.log")
+        g.save("run1", max_y=2.0)
+    """
+
+    train_loss_lists: list[LossSeries] = dataclasses.field(default_factory=list)
+    val_loss_lists: list[LossSeries] = dataclasses.field(default_factory=list)
+
+    def clear(self) -> "GraphCasanovoLoss":
+        """Remove any previously added loss series."""
+        self.train_loss_lists.clear()
+        self.val_loss_lists.clear()
+        return self
+
+    def add_csv_file(self, csv_path: PathLike) -> "GraphCasanovoLoss":
+        """Add a Casanovo ``metrics.csv`` file."""
+        train, val = read_from_csvfile(Path(csv_path))
+        self.train_loss_lists.append(train)
+        self.val_loss_lists.append(val)
+        return self
+
+    def add_log_file(self, log_path: PathLike) -> "GraphCasanovoLoss":
+        """Add a Casanovo training log file."""
+        train, val = read_from_logfile(Path(log_path))
+        self.train_loss_lists.append(train)
+        self.val_loss_lists.append(val)
+        return self
+
+    def add_file(self, input_path: PathLike) -> "GraphCasanovoLoss":
+        """Add a log file or metrics CSV (format is auto-detected)."""
+        file_format = detect_input_format(Path(input_path))
+        if file_format == "csv":
+            return self.add_csv_file(input_path)
+        return self.add_log_file(input_path)
+
+    def plot(
+        self,
+        root: str,
+        *inputs: PathLike,
+        max_y: float | None = None,
+    ) -> str:
+        """Read one or more inputs and write ``{root}.png``.
+
+        This is the recommended entry point for the CLI.
+
+        Parameters
+        ----------
+        root
+            Output file root name. Output is written to ``{root}.png``.
+        inputs
+            One or more Casanovo training logs and/or ``metrics.csv`` files.
+        max_y
+            Optional y-axis maximum.
+
+        Returns
+        -------
+        str
+            The output PNG path.
+        """
+        self.clear()
+        for p in inputs:
+            self.add_file(p)
+
+        return self.save(root, max_y=max_y)
+
+    def save(self, root: str, max_y: float | None = None) -> str:
+        """Save the current plot to ``{root}.png``."""
+        if not any(self.train_loss_lists) and not any(self.val_loss_lists):
+            raise ValueError("No loss entries found; nothing to plot.")
+
+        plot_losses(root, self.train_loss_lists, self.val_loss_lists, max_y)
+        return f"{root}.png"
+
+    def show(self, title: str = "Casanovo loss", max_y: float | None = None) -> None:
+        """Display the current plot (useful in interactive sessions)."""
+        if not any(self.train_loss_lists) and not any(self.val_loss_lists):
+            raise ValueError("No loss entries found; nothing to plot.")
+
+        fig, ax = plt.subplots()
+
+        for train_loss_list in self.train_loss_lists:
+            if not train_loss_list:
+                continue
+            steps, losses = zip(*train_loss_list)
+            ax.plot(steps, losses, "-o", markersize=2)
+
+        for val_loss_list in self.val_loss_lists:
+            if not val_loss_list:
+                continue
+            steps, losses = zip(*val_loss_list)
+            ax.plot(steps, losses, "-o", markersize=2)
+
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Loss")
+        ax.set_title(title)
+
+        if max_y is not None:
+            ax.set_ylim(0, max_y)
+
+        fig.set_figwidth(4)
+        fig.set_figheight(3)
+        fig.show()
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the script."""
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+def main() -> None:
+    """CLI entry."""
+    try:
+        import fire  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "The 'fire' package is required for the CLI. "
+            "Install it or import GraphCasanovoLoss from Python instead."
+        ) from exc
 
-    train_loss_lists: list[LossSeries] = []
-    val_loss_lists: list[LossSeries] = []
-    any_points = False
-
-    for input_path in args.inputs:
-        try:
-            train_loss_list, val_loss_list = read_from_file(input_path)
-        except (OSError, ValueError) as exc:
-            print(f"Error reading {input_path}: {exc}", file=sys.stderr)
-            return 2
-
-        if not train_loss_list and not val_loss_list:
-            print(
-                f"Warning: no loss entries found in {input_path}.",
-                file=sys.stderr,
-            )
-        else:
-            any_points = True
-
-        train_loss_lists.append(train_loss_list)
-        val_loss_lists.append(val_loss_list)
-
-    if not any_points:
-        print(
-            "Error: no loss entries found in any input file; nothing to plot.",
-            file=sys.stderr,
-        )
-        return 2
-
-    plot_losses(args.root, train_loss_lists, val_loss_lists, args.max_y)
-    return 0
+    fire.Fire(GraphCasanovoLoss)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
 
 # -----------------------------------------------------------------------------
 # Embedded samples and pytest tests
