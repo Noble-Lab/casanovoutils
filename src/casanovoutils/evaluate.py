@@ -1,165 +1,131 @@
-import dataclasses
-from typing import Iterable
+from os import PathLike
 
+import pyteomics.mztab
+import pandas as pd
 import numpy as np
 import tqdm
 
-Tokens = np.ndarray[str | float]
 
-
-class UnknownTokenError(ValueError):
-    pass
-
-
-@dataclasses.dataclass
-class PeptideSplitter:
+def get_ground_truth(
+    mztab_path: PathLike | pd.DataFrame, mgf_path: PathLike, replace_i_l: bool = False
+) -> tuple[tuple[np.ndarray, bool], np.ndarray, np.ndarray]:
     """
-    Split peptide sequences into residue tokens (optionally mapped to masses).
+    Align MzTab PSM predictions to MGF-provided ground-truth sequences.
 
-    This class implements a greedy, vocabulary-based tokenizer for peptide
-    sequences. It is designed for cases where "residues" are not necessarily
-    single amino-acid characters, but may include multi-character tokens such as
-    inline PTMs or alternative encodings (e.g., ``"M[Oxidation]"``, ``"ac-"``,
-    ``"cm"``, etc.).
+    This helper reads peptide-spectrum match (PSM) predictions from an MzTab
+    file (or an already-loaded PSM DataFrame), reads the ground-truth peptide
+    sequence for each spectrum from an MGF file (via ``SEQ=...`` lines), and
+    produces a per-spectrum table containing:
 
-    Tokenization is performed by repeatedly matching the *longest* token in the
-    vocabulary against the current prefix of the remaining sequence. Tokens are
-    sorted by decreasing length during initialization to ensure that longer
-    tokens take priority over their shorter prefixes (e.g., matching
-    ``"M[Oxidation]"`` before ``"M"``).
+    - ``ground_truth``: ground-truth peptide sequence from the MGF (SEQ=)
+    - ``predicted``: predicted peptide sequence from the MzTab PSM table
+    - ``pep_score``: score used to rank PSMs (from ``search_engine_score[1]``)
+    - ``pep_correct``: boolean exact-match correctness label
+
+    The MzTab rows are aligned to the MGF spectrum order using the integer
+    spectrum index parsed from the ``spectra_ref`` column, which is assumed to
+    have the form ``"ms_run[1]:index=<INT>"``. Only spectra referenced by the
+    MzTab receive predictions/scores; all others remain at default fill values.
 
     Parameters
     ----------
-    residues : dict[str, float]
-        Mapping from residue tokens to their mass values in Dalton. The keys
-        form the token vocabulary used for splitting.
-    progress : bool, default=False
-        If True, ``split_all`` shows a progress bar.
+    mztab_path : PathLike or pandas.DataFrame
+        Either a path to an MzTab file readable by ``pyteomics.mztab.MzTab``, or
+        a DataFrame representing the spectrum match table with at least the
+        columns:
+
+        - ``spectra_ref``
+        - ``sequence``
+        - ``search_engine_score[1]``
+    mgf_path : PathLike
+        Path to an MGF file containing ground-truth sequences. Ground truth is
+        extracted by scanning the file for lines beginning with ``"SEQ="``; the
+        order of these lines defines the spectrum index space used for alignment.
+    replace_i_l : bool, default=False
+        If True, treat isoleucine (I) and leucine (L) as equivalent by replacing
+        ``"I"`` with ``"L"`` in the ground-truth sequences prior to computing
+        correctness.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with one row per spectrum (i.e., per ``SEQ=`` line in the MGF),
+        containing the columns:
+
+        - ``ground_truth`` (str)
+        - ``predicted`` (str; empty string when missing)
+        - ``pep_score`` (float; -1.0 when missing)
+        - ``pep_correct`` (bool)
     """
+    if not isinstance(mztab_path, pd.DataFrame):
+        psm_df = pyteomics.mztab.MzTab(mztab_path).spectrum_match_table
+    else:
+        psm_df = mztab_path
 
-    residues: dict[str, float]
-    progress: bool = False
+    ground_truth = []
+    with open(mgf_path) as f:
+        for line in tqdm.tqdm(f, desc=f"Reading mgf file: {mgf_path}", unit="lines"):
+            if line.startswith("SEQ="):
+                ground_truth.append(line.removeprefix("SEQ=").strip())
 
-    def __post_init__(self) -> None:
-        """
-        Prepare the internal vocabulary ordering for longest-prefix matching.
+    spectra_idx = (
+        psm_df["spectra_ref"].str[len("ms_run[1]:index=") :].apply(int).to_numpy()
+    )
 
-        Tokens are sorted in decreasing order of token length so that longer
-        tokens are matched before their prefixes.
-        """
-        tokens = self.residues.keys()
-        tokens = sorted(tokens, key=len, reverse=True)
-        self._tokens = list(tokens)
+    predictions_df = pd.DataFrame({"ground_truth": ground_truth})
 
-    def split_seq(self, seq: str, to_mass: bool = False) -> Tokens | None:
-        """
-        Split a single peptide sequence into residue tokens.
+    for old, new in [
+        ("sequence", "predicted"),
+        ("search_engine_score[1]", "pep_score"),
+    ]:
+        predictions_df[new] = "" if new != "pep_score" else -1.0
+        predictions_df[new].iloc[spectra_idx] = psm_df[old]
 
-        Tokenization is performed greedily using longest-prefix matching against
-        the vocabulary provided by ``residues``. At each step, the longest token
-        that matches the current prefix is consumed and appended to the output.
+    if replace_i_l:
+        predictions_df["ground_truth"].str.replace("I", "L")
 
-        Parameters
-        ----------
-        seq : str
-            Peptide sequence encoded as a concatenation of residue tokens.
-        to_mass : bool, default=False
-            If True, map each matched residue token to its corresponding mass
-            using the ``residues`` dictionary.
+    predictions_df["pep_correct"] = (
+        predictions_df["ground_truth"] == predictions_df["predicted"]
+    )
 
-        Returns
-        -------
-        tokens : numpy.ndarray
-            1D NumPy array of tokens. If ``to_mass=False`` the array contains
-            strings. If ``to_mass=True`` the array contains floats.
+    return predictions_df
 
-        Raises
-        ------
-        UnknownTokenError
-            If no token in the vocabulary matches the current prefix of ``seq``.
 
-        Examples
-        --------
-        >>> residues = {"A": 71.03711, "M[Oxidation]": 147.0354, "M": 131.04049}
-        >>> splitter = PeptideSplitter(residues)
-        >>> splitter.split_seq("AM[Oxidation]M")
-        array(['A', 'M[Oxidation]', 'M'], dtype='<U...')
-        >>> splitter.split_seq("AM[Oxidation]M", to_mass=True)
-        array([ 71.03711, 147.0354 , 131.04049])
-        """
-        if seq is None:
-            return None
-        
-        # TODO: this should probably be made faster with a trie but residue
-        # vocabularies tend to be short so this is fine for now
-        out = []
-        while len(seq) > 0:
-            for token in self._tokens:
-                if seq.startswith(token):
-                    out.append(token)
-                    seq = seq[len(token) :]
-                    break
-            else:
-                raise UnknownTokenError(f"Prefix not found in vocabulary for: {seq}")
+def prec_cov(
+    scores: np.ndarray,
+    is_correct: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """
+    Compute the precision-coverage curve and its area-under-curve (AUPC) for a
+    set of scored predictions.
 
-        if to_mass:
-            out = list(map(self.residues, out))
+    Parameters
+    ----------
+    scores : np.ndarray
+        1D array of prediction scores, where higher values indicate greater
+        confidence.
+    is_correct : np.ndarray
+        1D boolean or binary array indicating whether each prediction is correct
+        (1/True) or incorrect (0/False). Must be the same length as ``scores``.
 
-        return np.array(out, dtype=np.float64 if to_mass else np.str_)
+    Returns
+    -------
+    precision : np.ndarray
+        Precision values at each coverage step after sorting by score. Length
+        ``N``.
+    coverage : np.ndarray
+        Coverage values, normalized to the range [0, 1], where ``coverage[i]``
+        is the fraction of samples included up to index ``i`` in the ranked
+        list.
+    aupc : float
+        Area under the precision-coverage curve.
+    """
+    sort_idx = np.argsort(scores)[::-1]
+    is_correct = is_correct[sort_idx]
+    total_coverage = np.arange(1, len(is_correct) + 1)
+    total_precision = np.cumsum(is_correct)
 
-    def split_all(
-        self, seqs: Iterable[str] | str, strict: bool = True, to_mass: bool = False
-    ) -> list[Tokens | None]:
-        """
-        Split one or more peptide sequences into residue tokens.
-
-        This is a convenience wrapper around ``split_seq`` that supports
-        processing multiple sequences, optionally with a progress bar, and with
-        configurable handling of unknown tokens.
-
-        Parameters
-        ----------
-        seqs : Iterable[str] or str
-            A single peptide sequence or an iterable of sequences to tokenize.
-        strict : bool, default=True
-            If True, unknown tokens raise ``UnknownTokenError`` immediately.
-            If False, sequences containing unknown tokens yield ``None`` in the
-            output list and tokenization continues for subsequent sequences.
-        to_mass : bool, default=False
-            If True, output arrays contain residue masses instead of token
-            strings.
-
-        Returns
-        -------
-        split : list[numpy.ndarray or None]
-            A list of token arrays (one per input sequence). If
-            ``strict=False``, entries corresponding to sequences that fail
-            tokenization will be ``None``.
-
-        Raises
-        ------
-        UnknownTokenError
-            If ``strict=True`` and any sequence contains an unknown token.
-
-        Examples
-        --------
-        >>> splitter.split_all(["PEPTIDE", "UNKNOWN"], strict=False)
-        [array([...]), None]
-        """
-        if isinstance(seqs, str):
-            seqs = [seqs]
-
-        if self.progress:
-            seqs = tqdm.tqdm(seqs)
-
-        out = []
-        for seq in seqs:
-            try:
-                out.append(self.split_seq(seq, to_mass=to_mass))
-            except UnknownTokenError as e:
-                if strict:
-                    raise e
-                else:
-                    out.append(None)
-
-        return out
+    precision = total_precision / total_coverage
+    coverage = total_coverage / total_coverage[-1]
+    aupc = np.trapz(precision, coverage)
+    return precision, coverage, aupc
