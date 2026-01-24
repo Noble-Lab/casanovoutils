@@ -38,9 +38,7 @@ def get_ground_truth(
         - ``sequence``
         - ``search_engine_score[1]``
     mgf_path : PathLike
-        Path to an MGF file containing ground-truth sequences. Ground truth is
-        extracted by scanning the file for lines beginning with ``"SEQ="``; the
-        order of these lines defines the spectrum index space used for alignment.
+        Path to an MGF file containing ground-truth sequences.
     replace_i_l : bool, default=False
         If True, treat isoleucine (I) and leucine (L) as equivalent by replacing
         ``"I"`` with ``"L"`` in the ground-truth sequences prior to computing
@@ -82,7 +80,9 @@ def get_ground_truth(
         predictions_df[new].iloc[spectra_idx] = psm_df[old]
 
     if replace_i_l:
-        predictions_df["ground_truth"].str.replace("I", "L")
+        predictions_df["ground_truth"] = predictions_df["ground_truth"].str.replace(
+            "I", "L"
+        )
 
     predictions_df["pep_correct"] = (
         predictions_df["ground_truth"] == predictions_df["predicted"]

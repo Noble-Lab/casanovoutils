@@ -176,7 +176,6 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-    
     fig_width: float = 3.0
     fig_height: float = 3.0
     fig_dpi: int = 150
