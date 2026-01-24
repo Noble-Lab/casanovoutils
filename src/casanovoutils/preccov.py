@@ -304,8 +304,6 @@ class GraphPrecCov:
 def prec_cov(
     scores: np.ndarray,
     is_correct: np.ndarray,
-    peptides_pred,
-    peptides_true,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Compute the precision-coverage curve and its area-under-curve (AUPC) for a

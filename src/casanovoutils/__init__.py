@@ -42,62 +42,6 @@ def get_pep_dict_mgf(mgf_files: Iterable[PathLike]) -> dict[str, list[dict[str, 
     return out
 
 
-def prec_cov(
-    scores: np.ndarray,
-    is_correct: np.ndarray,
-    peptides_pred,
-    peptides_true,
-) -> tuple[np.ndarray, np.ndarray, float]:
-    """
-    Compute the precision-coverage curve and its area-under-curve (AUPC) for a
-    set of scored predictions.
-
-    Parameters
-    ----------
-    scores : np.ndarray
-        1D array of prediction scores, where higher values indicate greater
-        confidence.
-    is_correct : np.ndarray
-        1D boolean or binary array indicating whether each prediction is correct
-        (1/True) or incorrect (0/False). Must be the same length as ``scores``.
-
-    Returns
-    -------
-    precision : np.ndarray
-        Precision values at each coverage step after sorting by score. Length
-        ``N``.
-    coverage : np.ndarray
-        Coverage values, normalized to the range [0, 1], where ``coverage[i]``
-        is the fraction of samples included up to index ``i`` in the ranked
-        list.
-    aupc : float
-        Area under the precision-coverage curve.
-    """
-    sort_idx = np.argsort(scores)[::-1]
-    is_correct = is_correct[sort_idx]
-    total_coverage = np.arange(1, len(is_correct) + 1)
-    total_precision = np.cumsum(is_correct)
-
-    precision = total_precision / total_coverage
-    coverage = total_coverage / total_coverage[-1]
-
-    pd.DataFrame(
-        {
-            "is-correct": is_correct,
-            "scores": scores[sort_idx],
-            "precision": precision,
-            "coverage": coverage,
-            "peptides-pred": peptides_pred,
-            "peptides-true": peptides_true,
-        }
-    ).to_csv(
-        "/net/noble/vol1/home/gstrau2/proj/casanovo_isoleucine/results/2026-01-22/fig-one/debug.csv"
-    )
-
-    aupc = np.trapz(precision, coverage)
-    return precision, coverage, aupc
-
-
 def get_residues(residues_path: Optional[PathLike] = None) -> dict[str, float]:
     """
     Load a mapping of amino acid residue names to masses from a YAML file.
