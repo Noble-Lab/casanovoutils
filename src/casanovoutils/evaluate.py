@@ -94,15 +94,16 @@ def get_ground_truth(
 
     for col in psm_df.columns:
         if col == "sequence":
-            predictions_df[col] = ""
+            predictions_df[col] = pd.Series("", index=range(len(ground_truth)), dtype="string")
         elif col == "search_engine_score[1]":
-            predictions_df[col] = MIN_PEP_SCORE
+            predictions_df[col] = pd.Series(
+                MIN_PEP_SCORE, index=range(len(ground_truth)), dtype="float64"
+            )
         else:
-            predictions_df[col] = pd.NA
-
-        curr_series = psm_df[col]
-        predictions_df[col] = predictions_df[col].astype(curr_series.dtype)
-        predictions_df[col].iloc[spectra_idx] = psm_df[col]
+            predictions_df[col] = None
+        
+        col_idx = predictions_df.columns.get_loc(col)
+        predictions_df.iloc[spectra_idx, col_idx] = psm_df[col]
 
     if replace_i_l:
         predictions_df["ground_truth"] = predictions_df["ground_truth"].str.replace(
