@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 import tqdm
 
+MIN_PEP_SCORE = -1.0
+
 
 def get_ground_truth(
     mztab_path: PathLike | pd.DataFrame, mgf_path: PathLike, replace_i_l: bool = False
@@ -15,30 +17,38 @@ def get_ground_truth(
     This helper reads peptide-spectrum match (PSM) predictions from an MzTab
     file (or an already-loaded PSM DataFrame), reads the ground-truth peptide
     sequence for each spectrum from an MGF file (via ``SEQ=...`` lines), and
-    produces a per-spectrum table containing:
-
-    - ``ground_truth``: ground-truth peptide sequence from the MGF (SEQ=)
-    - ``predicted``: predicted peptide sequence from the MzTab PSM table
-    - ``pep_score``: score used to rank PSMs (from ``search_engine_score[1]``)
-    - ``pep_correct``: boolean exact-match correctness label
+    returns a DataFrame indexed by MGF spectrum order with MzTab-derived fields
+    inserted at the corresponding spectrum indices.
 
     The MzTab rows are aligned to the MGF spectrum order using the integer
     spectrum index parsed from the ``spectra_ref`` column, which is assumed to
-    have the form ``"ms_run[1]:index=<INT>"``. Only spectra referenced by the
-    MzTab receive predictions/scores; all others remain at default fill values.
+    have the form::
+
+        "ms_run[1]:index=<INT>"
+
+    Only spectra referenced by the MzTab receive prediction values; all other
+    rows are filled with dtype-appropriate missing values (``pd.NA`` for most
+    columns, or column-specific defaults).
 
     Parameters
     ----------
     mztab_path : PathLike or pandas.DataFrame
-        Either a path to an MzTab file readable by ``pyteomics.mztab.MzTab``, or
-        a DataFrame representing the spectrum match table with at least the
-        columns:
+        Either:
 
-        - ``spectra_ref``
-        - ``sequence``
-        - ``search_engine_score[1]``
+        - A path to an MzTab file readable by ``pyteomics.mztab.MzTab``, or
+        - A DataFrame representing the spectrum match table.
+
+        The PSM table must contain at least:
+
+        - ``spectra_ref`` — used to determine spectrum index
+        - ``sequence`` — predicted peptide sequence
+
+        Any additional columns present in the PSM table are also propagated
+        into the output DataFrame.
     mgf_path : PathLike
-        Path to an MGF file containing ground-truth sequences.
+        Path to an MGF file containing ground-truth peptide sequences encoded as
+        ``SEQ=<PEPTIDE>`` lines. Each such line defines one spectrum entry in
+        order of appearance.
     replace_i_l : bool, default=False
         If True, treat isoleucine (I) and leucine (L) as equivalent by replacing
         ``"I"`` with ``"L"`` in the ground-truth sequences prior to computing
@@ -47,13 +57,23 @@ def get_ground_truth(
     Returns
     -------
     pandas.DataFrame
-        DataFrame with one row per spectrum (i.e., per ``SEQ=`` line in the MGF),
-        containing the columns:
+        A DataFrame with one row per spectrum (i.e., per ``SEQ=`` line in the
+        MGF). It always contains:
 
-        - ``ground_truth`` (str)
-        - ``predicted`` (str; empty string when missing)
-        - ``pep_score`` (float; -1.0 when missing)
-        - ``pep_correct`` (bool)
+        - ``ground_truth`` (string dtype)
+            Ground-truth peptide sequence from the MGF.
+
+        - All columns from the MzTab PSM table
+            These are inserted at the spectrum indices specified by
+            ``spectra_ref``. Rows without a corresponding PSM retain missing
+            values.
+
+        - ``pep_correct`` (boolean)
+            Exact-match correctness label computed as::
+
+                ground_truth == sequence
+
+            after optional I/L replacement.
     """
     if not isinstance(mztab_path, pd.DataFrame):
         psm_df = pyteomics.mztab.MzTab(mztab_path).spectrum_match_table
@@ -72,12 +92,17 @@ def get_ground_truth(
 
     predictions_df = pd.DataFrame({"ground_truth": ground_truth})
 
-    for old, new in [
-        ("sequence", "predicted"),
-        ("search_engine_score[1]", "pep_score"),
-    ]:
-        predictions_df[new] = "" if new != "pep_score" else -1.0
-        predictions_df[new].iloc[spectra_idx] = psm_df[old]
+    for col in psm_df.columns:
+        if col == "sequence":
+            predictions_df[col] = ""
+        elif col == "search_engine_score[1]":
+            predictions_df[col] = MIN_PEP_SCORE
+        else:
+            predictions_df[col] = pd.NA
+
+        curr_series = psm_df[col]
+        predictions_df[col] = predictions_df[col].astype(curr_series.dtype)
+        predictions_df[col].iloc[spectra_idx] = psm_df[col]
 
     if replace_i_l:
         predictions_df["ground_truth"] = predictions_df["ground_truth"].str.replace(
@@ -85,7 +110,7 @@ def get_ground_truth(
         )
 
     predictions_df["pep_correct"] = (
-        predictions_df["ground_truth"] == predictions_df["predicted"]
+        predictions_df["ground_truth"] == predictions_df["sequence"]
     )
 
     return predictions_df
