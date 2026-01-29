@@ -1,22 +1,23 @@
 import pathlib
 import shutil
 from os import PathLike
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 import tqdm
 import fire
 import pyteomics.mgf
 import yaml
 
+PyteomicsSpectrum = list[dict[str, Any]]
 
-def get_pep_dict_mgf(mgf_files: Iterable[PathLike]) -> dict[str, list[dict[str, Any]]]:
+def get_pep_dict_mgf(mgf_files: PathLike) -> dict[str, PyteomicsSpectrum]:
     """
-    Read one or more MGF files and group spectra by peptide sequence.
+    Read a MGF file and group spectra by peptide sequence.
 
     Parameters
     ----------
-    mgf_files : Iterable[PathLike]
-        Iterable of paths to MGF files. Each file is parsed into PSMs.
+    mgf_files : PathLike
+        Path to an MGF file.
 
     Returns
     -------
@@ -24,9 +25,8 @@ def get_pep_dict_mgf(mgf_files: Iterable[PathLike]) -> dict[str, list[dict[str, 
         A mapping from peptide sequence (str) to a list of corresponding
         pyteomics MGF spectrum dictionaries.
     """
-    mgf_iter = tqdm.tqdm(
-        pyteomics.mgf.from_iterable(mgf_files), desc=f"Reading mgf files", unit="psm"
-    )
+    mgf_iter = pyteomics.mgf.read(mgf_files)
+    mgf_iter = tqdm.tqdm(mgf_iter, desc=f"Reading mgf file", unit="psm")
 
     out = {}
     for curr in mgf_iter:
