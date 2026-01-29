@@ -26,7 +26,7 @@ def get_pep_dict_mgf(mgf_files: PathLike) -> dict[str, PyteomicsSpectrum]:
         A mapping from peptide sequence (str) to a list of corresponding
         pyteomics MGF spectrum dictionaries.
     """
-    mgf_iter = pyteomics.mgf.read(mgf_files)
+    mgf_iter = pyteomics.mgf.read(mgf_files, use_index=False)
     mgf_iter = tqdm.tqdm(mgf_iter, desc=f"Reading mgf file", unit="psm")
 
     out = {}

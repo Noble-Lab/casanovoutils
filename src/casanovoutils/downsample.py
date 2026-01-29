@@ -50,7 +50,8 @@ def downsample_mgf_pep(
         random.shuffle(spectra)
 
     pyteomics.mgf.write(
-        tqdm.tqdm(spectra, desc=f"Writing output file {outfile}", unit="psm")
+        tqdm.tqdm(spectra, desc=f"Writing output file {outfile}", unit="psm"),
+        output=outfile
     )
 
 
