@@ -11,24 +11,37 @@ import yaml
 PyteomicsSpectrum = list[dict[str, Any]]
 
 
-def get_pep_dict_mgf(mgf_files: PathLike) -> dict[str, PyteomicsSpectrum]:
+def get_pep_dict_mgf(
+    mgf_file: PathLike | pyteomics.mgf.MGF,
+) -> dict[str, PyteomicsSpectrum]:
     """
-    Read a MGF file and group spectra by peptide sequence.
+    Read spectra from an MGF file  and group them by peptide sequence.
+
+    This function iterates through all spectra in an MGF source and builds a
+    dictionary mapping each peptide sequence to the list of spectra (PSMs)
+    annotated with that sequence.
 
     Parameters
     ----------
-    mgf_files : PathLike
-        Path to an MGF file.
+    mgf_file : PathLike or pyteomics.mgf.MGFBase
+        Either:
+        - A filesystem path to an MGF file, which will be opened using
+          ``pyteomics.mgf.read(..., use_index=False)``, or
+        - An existing Pyteomics MGF reader/iterator (e.g., ``MGF`` or
+          ``IndexedMGF``), in which case it is used directly.
 
     Returns
     -------
-    dict[str, list[dict[str, Any]]]
-        A mapping from peptide sequence (str) to a list of corresponding
-        pyteomics MGF spectrum dictionaries.
+    dict[str, list[PyteomicsSpectrum]]
+        A dictionary mapping peptide sequence strings (taken from
+        ``spectrum["params"]["seq"]``) to a list of Pyteomics spectrum
+        dictionaries corresponding to that sequence. Each value in the list is
+        one spectrum/PSM entry as yielded by Pyteomics.
     """
-    mgf_iter = pyteomics.mgf.read(mgf_files, use_index=False)
-    mgf_iter = tqdm.tqdm(mgf_iter, desc=f"Reading mgf file", unit="psm")
+    if not isinstance(mgf_file, pyteomics.mgf.MGFBase):
+        mgf_iter = pyteomics.mgf.read(mgf_file, use_index=False)
 
+    mgf_iter = tqdm.tqdm(mgf_iter, desc=f"Reading mgf file", unit="psm")
     out = {}
     for curr in mgf_iter:
         seq = curr["params"]["seq"]
