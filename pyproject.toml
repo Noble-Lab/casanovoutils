@@ -20,7 +20,7 @@ dependencies = [
 
 [project.scripts]
 casanovo-utils = "casanovoutils:main"
-downsample-ms = "casanovoutils.downsamplems:main"
+downsample-ms = "casanovoutils.downsample:main"
 graph-prec-cov = "casanovoutils.preccov:main"
 
 [build-system]
