@@ -1,10 +1,10 @@
-import random
 import itertools
+import random
 from os import PathLike
 
 import fire
-import tqdm
 import pyteomics.mgf
+import tqdm
 
 from . import get_pep_dict_mgf
 

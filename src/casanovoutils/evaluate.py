@@ -1,8 +1,8 @@
 from os import PathLike
 
-import pyteomics.mztab
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pyteomics.mztab
 import tqdm
 
 MIN_PEP_SCORE = -1.0
@@ -94,14 +94,16 @@ def get_ground_truth(
 
     for col in psm_df.columns:
         if col == "sequence":
-            predictions_df[col] = pd.Series("", index=range(len(ground_truth)), dtype="string")
+            predictions_df[col] = pd.Series(
+                "", index=range(len(ground_truth)), dtype="string"
+            )
         elif col == "search_engine_score[1]":
             predictions_df[col] = pd.Series(
                 MIN_PEP_SCORE, index=range(len(ground_truth)), dtype="float64"
             )
         else:
             predictions_df[col] = None
-        
+
         col_idx = predictions_df.columns.get_loc(col)
         predictions_df.iloc[spectra_idx, col_idx] = psm_df[col]
 

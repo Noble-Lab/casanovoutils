@@ -3,12 +3,13 @@ import shutil
 from os import PathLike
 from typing import Any, Optional
 
-import tqdm
 import fire
 import pyteomics.mgf
+import tqdm
 import yaml
 
 PyteomicsSpectrum = list[dict[str, Any]]
+
 
 def get_pep_dict_mgf(mgf_files: PathLike) -> dict[str, PyteomicsSpectrum]:
     """

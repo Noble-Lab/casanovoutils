@@ -1,7 +1,7 @@
+import dataclasses
 from os import PathLike
 
 import fire
-import dataclasses
 import matplotlib.pyplot as plt
 
 from .evaluate import get_ground_truth, prec_cov

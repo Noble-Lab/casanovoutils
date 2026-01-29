@@ -14,11 +14,10 @@
 
 from __future__ import annotations
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
-
-import matplotlib
 
 matplotlib.use("Agg")  # headless backend for CI
 
