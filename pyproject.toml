@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "fire>=0.7.1",
-    "matplotlib>=3.10.7",
+    "matplotlib>=3.9.0",
     "numpy>=1.26.4",
     "pandas>=2.3.3",
     "polars>=1.35.2",
@@ -23,6 +23,7 @@ casanovo-utils = "casanovoutils:main"
 mgf-utils = "casanovoutils.mgfutils:main"
 downsample-ms = "casanovoutils.downsample:main"
 graph-prec-cov = "casanovoutils.preccov:main"
+create-datasets = "casanovoutils.create_datasets:main"
 
 [build-system]
 requires = ["hatchling"]
