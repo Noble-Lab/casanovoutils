@@ -1,8 +1,5 @@
 """Tests for the create_datasets module."""
 
-import pathlib
-import random
-
 import numpy as np
 import pyteomics.mgf
 import pytest
@@ -144,9 +141,7 @@ class TestCreateDatasetsMultipleFiles:
         total = len(train) + len(val) + len(test)
         assert total == 30
 
-        all_peps = set(
-            _get_peptides(train) + _get_peptides(val) + _get_peptides(test)
-        )
+        all_peps = set(_get_peptides(train) + _get_peptides(val) + _get_peptides(test))
         assert any(p.startswith("PEPA") for p in all_peps)
         assert any(p.startswith("PEPB") for p in all_peps)
 
@@ -164,7 +159,9 @@ class TestCreateDatasetsSpectraPerPeptide:
         output_root = str(tmp_path / "out")
 
         create_datasets(
-            mgf, output_root=output_root, spectra_per_peptide=2,
+            mgf,
+            output_root=output_root,
+            spectra_per_peptide=2,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -212,7 +209,9 @@ class TestCreateDatasetsSpectraPerPeptide:
         output_root = str(tmp_path / "out")
 
         create_datasets(
-            mgf, output_root=output_root, spectra_per_peptide=5,
+            mgf,
+            output_root=output_root,
+            spectra_per_peptide=5,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -258,18 +257,18 @@ class TestCreateDatasetsReproducibility:
         )
 
         create_datasets(
-            mgf, output_root=str(tmp_path / "seed1"), random_seed=1,
+            mgf,
+            output_root=str(tmp_path / "seed1"),
+            random_seed=1,
         )
         create_datasets(
-            mgf, output_root=str(tmp_path / "seed2"), random_seed=999,
+            mgf,
+            output_root=str(tmp_path / "seed2"),
+            random_seed=999,
         )
 
-        peps_1 = set(
-            _get_peptides(_read_mgf(tmp_path / "seed1.train.mgf"))
-        )
-        peps_2 = set(
-            _get_peptides(_read_mgf(tmp_path / "seed2.train.mgf"))
-        )
+        peps_1 = set(_get_peptides(_read_mgf(tmp_path / "seed1.train.mgf")))
+        peps_2 = set(_get_peptides(_read_mgf(tmp_path / "seed2.train.mgf")))
         assert peps_1 != peps_2
 
 
@@ -281,8 +280,26 @@ class TestCreateDatasetsEdgeCases:
         with pytest.raises(ValueError, match="At least one MGF file"):
             create_datasets(output_root=str(tmp_path / "out"))
 
-    def test_small_dataset_minimum_one_per_split(self, tmp_path):
-        """With very few peptides, each split still gets at least one."""
+    def test_small_dataset_all_go_to_train(self, tmp_path):
+        """With fewer than 3 peptides, all go to train; val/test are empty."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i}", [100.0], [1.0]) for i in range(2)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.validation.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        assert len(train) == 2
+        assert len(val) == 0
+        assert len(test) == 0
+
+    def test_three_peptides_splits_normally(self, tmp_path):
+        """With exactly 3 peptides, each split gets at least one."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [(f"PEP{i}", [100.0], [1.0]) for i in range(3)],
@@ -323,21 +340,13 @@ class TestCreateDatasetsEdgeCases:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_spectra = train + val + test
-        shared_spectra = [
-            s for s in all_spectra if s["params"]["seq"] == "SHARED"
-        ]
+        shared_spectra = [s for s in all_spectra if s["params"]["seq"] == "SHARED"]
         assert len(shared_spectra) == 2
 
         # Both SHARED spectra must be in the same split.
-        shared_in_train = [
-            s for s in train if s["params"]["seq"] == "SHARED"
-        ]
-        shared_in_val = [
-            s for s in val if s["params"]["seq"] == "SHARED"
-        ]
-        shared_in_test = [
-            s for s in test if s["params"]["seq"] == "SHARED"
-        ]
+        shared_in_train = [s for s in train if s["params"]["seq"] == "SHARED"]
+        shared_in_val = [s for s in val if s["params"]["seq"] == "SHARED"]
+        shared_in_test = [s for s in test if s["params"]["seq"] == "SHARED"]
         counts = [len(shared_in_train), len(shared_in_val), len(shared_in_test)]
         assert sorted(counts) == [0, 0, 2]
 
@@ -400,7 +409,9 @@ class TestCreateDatasetsLogging:
         output_root = str(tmp_path / "out")
 
         create_datasets(
-            mgf, output_root=output_root, spectra_per_peptide=2,
+            mgf,
+            output_root=output_root,
+            spectra_per_peptide=2,
         )
 
         log = (tmp_path / "out.log").read_text()
@@ -491,3 +502,175 @@ class TestCreateDatasetsOverwrite:
         create_datasets(mgf, output_root=output_root)
 
         assert (tmp_path / "out.train.mgf").exists()
+
+
+class TestCreateDatasetsExistingSplits:
+    """Tests for the existing_splits and combine_with_existing options."""
+
+    def _make_existing_splits(self, tmp_path):
+        """Create existing train/val/test MGF files with known peptides."""
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("TRAIN1", [100.0], [1.0]), ("TRAIN2", [100.0], [1.0])],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [("VAL1", [100.0], [1.0])],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [("TEST1", [100.0], [1.0])],
+        )
+        return (train_path, val_path, test_path)
+
+    def test_overlapping_peptides_routed_correctly(self, tmp_path):
+        """Peptides in existing splits are routed to the correct split."""
+        existing = self._make_existing_splits(tmp_path)
+
+        # New data has some overlapping peptides plus novel ones.
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [
+                ("TRAIN1", [200.0], [2.0]),
+                ("VAL1", [200.0], [2.0]),
+                ("TEST1", [200.0], [2.0]),
+            ]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(20)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, existing_splits=existing)
+
+        train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
+
+        assert "TRAIN1" in train_peps
+        assert "VAL1" in val_peps
+        assert "TEST1" in test_peps
+
+    def test_new_peptides_distributed_to_reach_ratio(self, tmp_path):
+        """Novel peptides are distributed to approximate 80/10/10 overall."""
+        existing = self._make_existing_splits(tmp_path)
+
+        # 4 existing peptides + 96 new = 100 total.
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [(f"NEW{i}", [100.0], [1.0]) for i in range(96)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+            combine_with_existing=True,
+        )
+
+        train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
+
+        total = len(train_peps) + len(val_peps) + len(test_peps)
+        assert total == 100
+        # 80/10/10 of 100 => 80, 10, 10.
+        assert len(train_peps) == 80
+        assert len(val_peps) == 10
+        assert len(test_peps) == 10
+
+    def test_no_peptide_leakage_with_existing_splits(self, tmp_path):
+        """No peptide appears in more than one output split."""
+        existing = self._make_existing_splits(tmp_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("TRAIN1", [200.0], [2.0]), ("VAL1", [200.0], [2.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(30)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, existing_splits=existing)
+
+        train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
+
+        assert train_peps.isdisjoint(val_peps)
+        assert train_peps.isdisjoint(test_peps)
+        assert val_peps.isdisjoint(test_peps)
+
+    def test_combine_with_existing_includes_old_spectra(self, tmp_path):
+        """With combine_with_existing=True, output includes old spectra."""
+        existing = self._make_existing_splits(tmp_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [(f"NEW{i}", [100.0], [1.0]) for i in range(20)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+            combine_with_existing=True,
+        )
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.validation.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        all_peps = _get_peptides(train + val + test)
+        # Existing peptides should appear (from existing spectra).
+        assert "TRAIN1" in all_peps
+        assert "TRAIN2" in all_peps
+        assert "VAL1" in all_peps
+        assert "TEST1" in all_peps
+
+        # Total spectra should include old (4) + new (20).
+        total = len(train) + len(val) + len(test)
+        assert total == 24
+
+    def test_combine_with_existing_false_excludes_old(self, tmp_path):
+        """With combine_with_existing=False, output has only new spectra."""
+        existing = self._make_existing_splits(tmp_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [(f"NEW{i}", [100.0], [1.0]) for i in range(20)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+            combine_with_existing=False,
+        )
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.validation.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        # Only new spectra: 20 total.
+        total = len(train) + len(val) + len(test)
+        assert total == 20
+
+    def test_existing_splits_logged(self, tmp_path):
+        """Log reports counts of existing peptides and overlaps."""
+        existing = self._make_existing_splits(tmp_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("TRAIN1", [200.0], [2.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(10)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, existing_splits=existing)
+
+        log = (tmp_path / "out.log").read_text()
+        assert "Existing train: 2 peptides" in log
+        assert "Existing validation: 1 peptides" in log
+        assert "Existing test: 1 peptides" in log
+        assert "Peptides overlapping with existing splits: 1" in log
