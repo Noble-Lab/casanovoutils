@@ -671,6 +671,6 @@ class TestCreateDatasetsExistingSplits:
 
         log = (tmp_path / "out.log").read_text()
         assert "Existing train: 2 peptides" in log
-        assert "Existing validation: 1 peptides" in log
+        assert "Existing validation: 1 peptide" in log
         assert "Existing test: 1 peptides" in log
         assert "Peptides overlapping with existing splits: 1" in log
