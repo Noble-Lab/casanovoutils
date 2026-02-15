@@ -258,9 +258,18 @@ def create_datasets(
                 unit="PSM",
             )
             pyteomics.mgf.write(spectra=split_spectra_iter, output=outfile)
-            logger.info(
-                f"{split_name}: {len(split_spectra)} spectra, " f"{len(peps)} peptides"
-            )
+            if combine_with_existing:
+                total_peps = len(set(peps) | existing_peps[split_name])
+                logger.info(
+                    f"{split_name}: {len(split_spectra)} spectra, "
+                    f"{len(peps)} new peptides, "
+                    f"{total_peps} total peptides"
+                )
+            else:
+                logger.info(
+                    f"{split_name}: {len(split_spectra)} spectra, "
+                    f"{len(peps)} peptides"
+                )
     finally:
         file_handler.close()
         logger.removeHandler(file_handler)

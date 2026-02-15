@@ -674,3 +674,32 @@ class TestCreateDatasetsExistingSplits:
         assert "Existing validation: 1 peptide" in log
         assert "Existing test: 1 peptide" in log
         assert "Peptides overlapping with existing splits: 1" in log
+
+    def test_combine_with_existing_log_shows_total_peptides(self, tmp_path):
+        """With combine_with_existing=True, log shows new and total peptide counts."""
+        existing = self._make_existing_splits(tmp_path)
+
+        # 4 existing + 96 new = 100 total; no overlap.
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [(f"NEW{i}", [100.0], [1.0]) for i in range(96)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+            combine_with_existing=True,
+        )
+
+        log = (tmp_path / "out.log").read_text()
+        # Train: 2 existing + 78 new = 80 total peptides.
+        assert "new peptides" in log
+        assert "total peptides" in log
+        # Verify train line has both counts.
+        for line in log.splitlines():
+            if line.startswith("train:"):
+                assert "78 new peptides" in line
+                assert "80 total peptides" in line
+                break
