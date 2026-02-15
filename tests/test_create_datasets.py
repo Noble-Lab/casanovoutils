@@ -224,8 +224,8 @@ class TestCreateDatasetsSpectraPerPeptide:
             pep = s["params"]["seq"]
             pep_counts[pep] = pep_counts.get(pep, 0) + 1
 
-        assert pep_counts.get("PEPA", 0) <= 1
-        assert pep_counts.get("PEPB", 0) <= 3
+        assert pep_counts.get("PEPA", 0) == 1
+        assert pep_counts.get("PEPB", 0) == 3
 
 
 class TestCreateDatasetsReproducibility:

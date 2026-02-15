@@ -234,6 +234,12 @@ def create_datasets(
                 target_test = max(1, round(total_peptides * 0.1))
                 target_train = total_peptides - target_val - target_test
             else:
+                logger.warning(
+                    "Fewer than 3 peptides available across existing and "
+                    "new data (%d peptides). One or more of the "
+                    "train/validation/test splits may be empty.",
+                    total_peptides,
+                )
                 target_train = round(total_peptides * 0.8)
                 target_val = round(total_peptides * 0.1)
                 target_test = total_peptides - target_train - target_val
