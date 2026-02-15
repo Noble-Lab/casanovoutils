@@ -153,6 +153,12 @@ def create_datasets(
         existing_spectra = {"train": [], "validation": [], "test": []}
         if existing_splits is not None:
             split_names = ("train", "validation", "test")
+            if len(existing_splits) != 3:
+                raise ValueError(
+                    f"existing_splits must contain exactly three paths "
+                    f"(train, validation, test), but {len(existing_splits)} "
+                    f"were provided."
+                )
             for split_name, split_path in zip(split_names, existing_splits):
                 for spectrum in tqdm.tqdm(
                     pyteomics.mgf.read(str(split_path), use_index=False),
@@ -221,9 +227,14 @@ def create_datasets(
                 + len(existing_peps["test"])
                 + len(new_peptides)
             )
-            target_train = round(total_peptides * 0.8)
-            target_val = round(total_peptides * 0.1)
-            target_test = total_peptides - target_train - target_val
+            if total_peptides >= 3:
+                target_val = max(1, round(total_peptides * 0.1))
+                target_test = max(1, round(total_peptides * 0.1))
+                target_train = total_peptides - target_val - target_test
+            else:
+                target_train = round(total_peptides * 0.8)
+                target_val = round(total_peptides * 0.1)
+                target_test = total_peptides - target_train - target_val
 
             need_train = max(0, target_train - len(existing_peps["train"]))
             need_val = max(0, target_val - len(existing_peps["validation"]))
