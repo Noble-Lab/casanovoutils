@@ -58,6 +58,12 @@ def create_datasets(
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
 
+    if spectra_per_peptide is not None and spectra_per_peptide <= 0:
+        raise ValueError(
+            f"spectra_per_peptide must be a positive integer, "
+            f"got {spectra_per_peptide}."
+        )
+
     if not overwrite:
         expected_files = [
             pathlib.Path(f"{output_root}.{split}.mgf")
@@ -155,11 +161,19 @@ def create_datasets(
         for pep in sorted(pep_dict.keys()):
             assigned = False
             if existing_splits is not None:
-                for split_name in ("train", "validation", "test"):
-                    if pep in existing_peps[split_name]:
-                        pre_assigned[split_name].append(pep)
-                        assigned = True
-                        break
+                pep_splits = [
+                    split_name
+                    for split_name in ("train", "validation", "test")
+                    if pep in existing_peps[split_name]
+                ]
+                if len(pep_splits) > 1:
+                    raise ValueError(
+                        f"Peptide {pep} appears in multiple existing splits: "
+                        f"{', '.join(pep_splits)}"
+                    )
+                elif len(pep_splits) == 1:
+                    pre_assigned[pep_splits[0]].append(pep)
+                    assigned = True
             if not assigned:
                 new_peptides.append(pep)
 
@@ -273,6 +287,8 @@ def create_datasets(
     finally:
         file_handler.close()
         logger.removeHandler(file_handler)
+        stream_handler.close()
+        logger.removeHandler(stream_handler)
 
 
 def main() -> None:

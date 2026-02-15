@@ -280,6 +280,28 @@ class TestCreateDatasetsEdgeCases:
         with pytest.raises(ValueError, match="At least one MGF file"):
             create_datasets(output_root=str(tmp_path / "out"))
 
+    def test_spectra_per_peptide_zero_raises_error(self, tmp_path):
+        """Passing spectra_per_peptide=0 should raise a ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+            create_datasets(
+                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=0
+            )
+
+    def test_spectra_per_peptide_negative_raises_error(self, tmp_path):
+        """Passing a negative spectra_per_peptide should raise a ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+            create_datasets(
+                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=-1
+            )
+
     def test_small_dataset_all_go_to_train(self, tmp_path):
         """With fewer than 3 peptides, all go to train; val/test are empty."""
         mgf = _write_mgf(
@@ -703,3 +725,32 @@ class TestCreateDatasetsExistingSplits:
                 assert "78 new peptides" in line
                 assert "80 total peptides" in line
                 break
+
+    def test_duplicate_peptide_across_existing_splits_raises_error(self, tmp_path):
+        """A peptide in multiple existing splits should raise ValueError."""
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("SHARED", [100.0], [1.0]), ("TRAIN1", [100.0], [1.0])],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [("SHARED", [100.0], [1.0])],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [("TEST1", [100.0], [1.0])],
+        )
+        existing = (train_path, val_path, test_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("SHARED", [200.0], [2.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(10)],
+        )
+
+        with pytest.raises(ValueError, match="multiple existing splits"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=existing,
+            )
