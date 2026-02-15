@@ -88,6 +88,8 @@ def create_datasets(
 
     logger = logging.getLogger("create_datasets")
     logger.propagate = False
+    stream_handler = None
+    file_handler = None
     try:
         logger.setLevel(logging.INFO)
         # Close and remove any pre-existing handlers to avoid leaking resources.
@@ -330,10 +332,12 @@ def create_datasets(
                     f"{len(peps)} peptides"
                 )
     finally:
-        file_handler.close()
-        logger.removeHandler(file_handler)
-        stream_handler.close()
-        logger.removeHandler(stream_handler)
+        if file_handler is not None:
+            file_handler.close()
+            logger.removeHandler(file_handler)
+        if stream_handler is not None:
+            stream_handler.close()
+            logger.removeHandler(stream_handler)
 
 
 def main() -> None:
