@@ -82,6 +82,7 @@ def create_datasets(
             )
 
     logger = logging.getLogger("create_datasets")
+    logger.propagate = False
     try:
         logger.setLevel(logging.INFO)
         # Close and remove any pre-existing handlers to avoid leaking resources.
