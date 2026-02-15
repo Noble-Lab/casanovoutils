@@ -299,6 +299,20 @@ class TestCreateDatasetsEdgeCases:
                 combine_with_existing=True,
             )
 
+    def test_existing_splits_wrong_length_raises_error(self, tmp_path):
+        """existing_splits with != 3 paths should raise ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        split = _write_mgf(tmp_path / "split.mgf", [("X", [100.0], [1.0])])
+        with pytest.raises(ValueError, match="exactly three paths"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=(split, split),
+            )
+
     def test_spectra_per_peptide_zero_raises_error(self, tmp_path):
         """Passing spectra_per_peptide=0 should raise a ValueError."""
         mgf = _write_mgf(
