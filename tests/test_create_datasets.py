@@ -754,3 +754,35 @@ class TestCreateDatasetsExistingSplits:
                 output_root=str(tmp_path / "out"),
                 existing_splits=existing,
             )
+
+    def test_duplicate_peptide_across_existing_splits_without_new_overlap(
+        self, tmp_path
+    ):
+        """Overlapping existing splits raise ValueError even without that peptide in new input."""
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("SHARED", [100.0], [1.0]), ("TRAIN1", [100.0], [1.0])],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [("SHARED", [100.0], [1.0])],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [("TEST1", [100.0], [1.0])],
+        )
+        existing = (train_path, val_path, test_path)
+
+        # New data does not contain the duplicated peptide "SHARED".
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [(f"NEW{i}", [100.0], [1.0]) for i in range(10)],
+        )
+
+        with pytest.raises(ValueError, match="multiple existing splits"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=existing,
+                combine_with_existing=True,
+            )

@@ -4,6 +4,7 @@ import itertools
 import logging
 import pathlib
 import random
+import sys
 from os import PathLike
 from typing import Optional
 
@@ -41,7 +42,9 @@ def create_datasets(
         also be created.
     spectra_per_peptide : int, optional
         If provided, randomly select at most this many spectra for each
-        peptide. By default all spectra are retained.
+        peptide from the new input files. When ``combine_with_existing``
+        is True, existing spectra are not subject to this cap. By default
+        all spectra are retained.
     random_seed : int, default=42
         Random seed for reproducible splitting and sampling.
     overwrite : bool, default=False
@@ -81,11 +84,16 @@ def create_datasets(
     logger = logging.getLogger("create_datasets")
     try:
         logger.setLevel(logging.INFO)
-        logger.handlers.clear()
+        # Close and remove any pre-existing handlers to avoid leaking resources.
+        for handler in list(logger.handlers):
+            try:
+                handler.close()
+            finally:
+                logger.removeHandler(handler)
 
         formatter = logging.Formatter("%(message)s")
 
-        stream_handler = logging.StreamHandler()
+        stream_handler = logging.StreamHandler(stream=sys.stdout)
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
@@ -154,6 +162,20 @@ def create_datasets(
                     f"{len(existing_peps[split_name])} peptides"
                 )
 
+            # Validate mutual exclusivity of existing splits.
+            for name_a, name_b in (
+                ("train", "validation"),
+                ("train", "test"),
+                ("validation", "test"),
+            ):
+                shared = existing_peps[name_a] & existing_peps[name_b]
+                if shared:
+                    raise ValueError(
+                        f"Peptide(s) found in multiple existing splits "
+                        f"({name_a}, {name_b}): "
+                        f"{', '.join(sorted(shared))}"
+                    )
+
             all_existing = (
                 existing_peps["train"]
                 | existing_peps["validation"]
@@ -170,18 +192,14 @@ def create_datasets(
         for pep in sorted(pep_dict.keys()):
             assigned = False
             if existing_splits is not None:
-                pep_splits = [
-                    split_name
-                    for split_name in ("train", "validation", "test")
-                    if pep in existing_peps[split_name]
-                ]
-                if len(pep_splits) > 1:
-                    raise ValueError(
-                        f"Peptide {pep} appears in multiple existing splits: "
-                        f"{', '.join(pep_splits)}"
-                    )
-                elif len(pep_splits) == 1:
-                    pre_assigned[pep_splits[0]].append(pep)
+                if pep in existing_peps["train"]:
+                    pre_assigned["train"].append(pep)
+                    assigned = True
+                elif pep in existing_peps["validation"]:
+                    pre_assigned["validation"].append(pep)
+                    assigned = True
+                elif pep in existing_peps["test"]:
+                    pre_assigned["test"].append(pep)
                     assigned = True
             if not assigned:
                 new_peptides.append(pep)
@@ -282,10 +300,11 @@ def create_datasets(
             )
             pyteomics.mgf.write(spectra=split_spectra_iter, output=outfile)
             if combine_with_existing:
+                new_pep_count = len(set(peps) - existing_peps[split_name])
                 total_peps = len(set(peps) | existing_peps[split_name])
                 logger.info(
                     f"{split_name}: {len(split_spectra)} spectra, "
-                    f"{len(peps)} new peptides, "
+                    f"{new_pep_count} new peptides, "
                     f"{total_peps} total peptides"
                 )
             else:
