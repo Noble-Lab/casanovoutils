@@ -124,12 +124,21 @@ def create_datasets(
         total_spectra = 0
         for mgf_file in mgf_files:
             file_count = 0
-            for spectrum in tqdm.tqdm(
-                pyteomics.mgf.read(str(mgf_file), use_index=False),
-                desc=f"Reading {mgf_file}",
-                unit="PSM",
+            for spectrum_index, spectrum in enumerate(
+                tqdm.tqdm(
+                    pyteomics.mgf.read(str(mgf_file), use_index=False),
+                    desc=f"Reading {mgf_file}",
+                    unit="PSM",
+                ),
+                start=1,
             ):
-                seq = spectrum["params"]["seq"]
+                try:
+                    seq = spectrum["params"]["seq"]
+                except KeyError as exc:
+                    raise KeyError(
+                        f"Missing 'seq' in spectrum params for spectrum "
+                        f"{spectrum_index} in file {mgf_file}"
+                    ) from exc
                 pep_dict.setdefault(seq, []).append(spectrum)
                 file_count += 1
             logger.info(f"Read {file_count} spectra from {mgf_file}.")
@@ -138,8 +147,8 @@ def create_datasets(
         logger.info(f"Total spectra read: {total_spectra}")
         logger.info(f"Unique peptides: {len(pep_dict)}")
 
-        spectra_before = sum(len(psms) for psms in pep_dict.values())
         if spectra_per_peptide is not None:
+            spectra_before = sum(len(psms) for psms in pep_dict.values())
             for pep, psms in pep_dict.items():
                 if len(psms) > spectra_per_peptide:
                     pep_dict[pep] = random.sample(psms, spectra_per_peptide)
@@ -167,7 +176,14 @@ def create_datasets(
                     desc=f"Reading existing {split_name}",
                     unit="PSM",
                 ):
-                    seq = spectrum["params"]["seq"]
+                    try:
+                        seq = spectrum["params"]["seq"]
+                    except KeyError as exc:
+                        raise KeyError(
+                            f"Missing 'seq' in spectrum params while reading "
+                            f"existing split '{split_name}' from file "
+                            f"'{split_path}'"
+                        ) from exc
                     existing_peps[split_name].add(seq)
                     if combine_with_existing:
                         existing_spectra[split_name].append(spectrum)
