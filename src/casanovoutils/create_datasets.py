@@ -67,6 +67,11 @@ def create_datasets(
             f"got {spectra_per_peptide}."
         )
 
+    if combine_with_existing and existing_splits is None:
+        raise ValueError(
+            "combine_with_existing=True requires existing_splits to be provided."
+        )
+
     if not overwrite:
         expected_files = [
             pathlib.Path(f"{output_root}.{split}.mgf")

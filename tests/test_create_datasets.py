@@ -250,7 +250,7 @@ class TestCreateDatasetsReproducibility:
             assert peps_1 == peps_2
 
     def test_different_seed_produces_different_splits(self, tmp_path):
-        """Different seeds should (almost certainly) produce different splits."""
+        """Different seeds produce different ordered peptide assignments."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [(f"PEP{i}", [100.0], [1.0]) for i in range(30)],
@@ -267,9 +267,15 @@ class TestCreateDatasetsReproducibility:
             random_seed=999,
         )
 
-        peps_1 = set(_get_peptides(_read_mgf(tmp_path / "seed1.train.mgf")))
-        peps_2 = set(_get_peptides(_read_mgf(tmp_path / "seed2.train.mgf")))
-        assert peps_1 != peps_2
+        # Compare ordered peptide lists across all splits. Two different
+        # seeds produce different permutations of 30 peptides, so the
+        # concatenated ordered lists are deterministically different.
+        all_peps_1 = []
+        all_peps_2 = []
+        for split in ("train", "validation", "test"):
+            all_peps_1.extend(_get_peptides(_read_mgf(tmp_path / f"seed1.{split}.mgf")))
+            all_peps_2.extend(_get_peptides(_read_mgf(tmp_path / f"seed2.{split}.mgf")))
+        assert all_peps_1 != all_peps_2
 
 
 class TestCreateDatasetsEdgeCases:
@@ -279,6 +285,19 @@ class TestCreateDatasetsEdgeCases:
         """Passing zero MGF files should raise a ValueError."""
         with pytest.raises(ValueError, match="At least one MGF file"):
             create_datasets(output_root=str(tmp_path / "out"))
+
+    def test_combine_with_existing_without_existing_splits_raises_error(self, tmp_path):
+        """combine_with_existing=True without existing_splits should raise."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        with pytest.raises(ValueError, match="combine_with_existing.*requires"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                combine_with_existing=True,
+            )
 
     def test_spectra_per_peptide_zero_raises_error(self, tmp_path):
         """Passing spectra_per_peptide=0 should raise a ValueError."""
