@@ -79,18 +79,27 @@ def create_datasets(
             )
 
     logger = logging.getLogger("create_datasets")
-    logger.setLevel(logging.INFO)
-    logger.handlers.clear()
+    try:
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
 
-    formatter = logging.Formatter("%(message)s")
+        formatter = logging.Formatter("%(message)s")
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
 
-    file_handler = logging.FileHandler(f"{output_root}.log", mode="w")
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+        file_handler = logging.FileHandler(f"{output_root}.log", mode="w")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception:
+        # Clean up any handlers that were added before the failure.
+        for handler in list(logger.handlers):
+            try:
+                handler.close()
+            finally:
+                logger.removeHandler(handler)
+        raise
 
     try:
         random.seed(random_seed)
