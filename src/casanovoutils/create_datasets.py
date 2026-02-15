@@ -146,7 +146,7 @@ def create_datasets(
             )
             overlapping = all_existing & set(pep_dict.keys())
             logger.info(
-                f"Peptides overlapping with existing splits: " f"{len(overlapping)}"
+                f"Peptides overlapping with existing splits: {len(overlapping)}"
             )
 
         # Partition peptides into pre-assigned and new.
