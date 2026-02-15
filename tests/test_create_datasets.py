@@ -59,7 +59,7 @@ class TestCreateDatasetsBasic:
         create_datasets(mgf, output_root=output_root)
 
         assert (tmp_path / "out.train.mgf").exists()
-        assert (tmp_path / "out.validation.mgf").exists()
+        assert (tmp_path / "out.val.mgf").exists()
         assert (tmp_path / "out.test.mgf").exists()
 
     def test_all_spectra_preserved(self, tmp_path):
@@ -74,7 +74,7 @@ class TestCreateDatasetsBasic:
         create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         assert len(train) + len(val) + len(test) == n_peptides
@@ -90,7 +90,7 @@ class TestCreateDatasetsBasic:
         create_datasets(mgf, output_root=output_root)
 
         train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
-        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.val.mgf")))
         test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
 
         assert train_peps.isdisjoint(val_peps)
@@ -109,7 +109,7 @@ class TestCreateDatasetsBasic:
         create_datasets(mgf, output_root=output_root)
 
         train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
-        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.val.mgf")))
         test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
 
         assert len(train_peps) == 80
@@ -135,7 +135,7 @@ class TestCreateDatasetsMultipleFiles:
         create_datasets(mgf1, mgf2, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         total = len(train) + len(val) + len(test)
@@ -165,7 +165,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_spectra = train + val + test
@@ -189,7 +189,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         assert len(train) + len(val) + len(test) == 50
@@ -215,7 +215,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_spectra = train + val + test
@@ -242,7 +242,7 @@ class TestCreateDatasetsReproducibility:
             output_root = str(tmp_path / run)
             create_datasets(mgf, output_root=output_root, random_seed=123)
 
-        for split in ("train", "validation", "test"):
+        for split in ("train", "val", "test"):
             spectra_1 = _read_mgf(tmp_path / f"run1.{split}.mgf")
             spectra_2 = _read_mgf(tmp_path / f"run2.{split}.mgf")
             peps_1 = _get_peptides(spectra_1)
@@ -272,7 +272,7 @@ class TestCreateDatasetsReproducibility:
         # concatenated ordered lists are deterministically different.
         all_peps_1 = []
         all_peps_2 = []
-        for split in ("train", "validation", "test"):
+        for split in ("train", "val", "test"):
             all_peps_1.extend(_get_peptides(_read_mgf(tmp_path / f"seed1.{split}.mgf")))
             all_peps_2.extend(_get_peptides(_read_mgf(tmp_path / f"seed2.{split}.mgf")))
         assert all_peps_1 != all_peps_2
@@ -346,7 +346,7 @@ class TestCreateDatasetsEdgeCases:
         create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         assert len(train) == 2
@@ -364,7 +364,7 @@ class TestCreateDatasetsEdgeCases:
         create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         assert len(train) >= 1
@@ -391,7 +391,7 @@ class TestCreateDatasetsEdgeCases:
         create_datasets(mgf1, mgf2, mgf3, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_spectra = train + val + test
@@ -497,7 +497,7 @@ class TestCreateDatasetsLogging:
 
         log = (tmp_path / "out.log").read_text()
         assert "train: 80 spectra, 80 peptides" in log
-        assert "validation: 10 spectra, 10 peptides" in log
+        assert "val: 10 spectra, 10 peptides" in log
         assert "test: 10 spectra, 10 peptides" in log
 
 
@@ -529,7 +529,7 @@ class TestCreateDatasetsOverwrite:
         create_datasets(mgf, output_root=output_root, overwrite=True)
 
         assert (tmp_path / "out.train.mgf").exists()
-        assert (tmp_path / "out.validation.mgf").exists()
+        assert (tmp_path / "out.val.mgf").exists()
         assert (tmp_path / "out.test.mgf").exists()
 
     def test_error_lists_existing_files(self, tmp_path):
@@ -597,7 +597,7 @@ class TestCreateDatasetsExistingSplits:
         create_datasets(mgf, output_root=output_root, existing_splits=existing)
 
         train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
-        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.val.mgf")))
         test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
 
         assert "TRAIN1" in train_peps
@@ -623,7 +623,7 @@ class TestCreateDatasetsExistingSplits:
         )
 
         train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
-        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.val.mgf")))
         test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
 
         total = len(train_peps) + len(val_peps) + len(test_peps)
@@ -647,7 +647,7 @@ class TestCreateDatasetsExistingSplits:
         create_datasets(mgf, output_root=output_root, existing_splits=existing)
 
         train_peps = set(_get_peptides(_read_mgf(tmp_path / "out.train.mgf")))
-        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.validation.mgf")))
+        val_peps = set(_get_peptides(_read_mgf(tmp_path / "out.val.mgf")))
         test_peps = set(_get_peptides(_read_mgf(tmp_path / "out.test.mgf")))
 
         assert train_peps.isdisjoint(val_peps)
@@ -672,7 +672,7 @@ class TestCreateDatasetsExistingSplits:
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_peps = _get_peptides(train + val + test)
@@ -704,7 +704,7 @@ class TestCreateDatasetsExistingSplits:
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
-        val = _read_mgf(tmp_path / "out.validation.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         # Only new spectra: 20 total.
@@ -726,7 +726,7 @@ class TestCreateDatasetsExistingSplits:
 
         log = (tmp_path / "out.log").read_text()
         assert "Existing train: 2 peptides" in log
-        assert "Existing validation: 1 peptide" in log
+        assert "Existing val: 1 peptide" in log
         assert "Existing test: 1 peptide" in log
         assert "Peptides overlapping with existing splits: 1" in log
 

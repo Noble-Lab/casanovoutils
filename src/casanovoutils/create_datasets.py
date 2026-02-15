@@ -37,7 +37,7 @@ def create_datasets(
         the peptide sequence in ``spectrum["params"]["seq"]``.
     output_root : str
         Root path for the output files. Three MGF files will be created:
-        ``<output_root>.train.mgf``, ``<output_root>.validation.mgf``, and
+        ``<output_root>.train.mgf``, ``<output_root>.val.mgf``, and
         ``<output_root>.test.mgf``. A log file ``<output_root>.log`` will
         also be created.
     spectra_per_peptide : int, optional
@@ -75,7 +75,7 @@ def create_datasets(
     if not overwrite:
         expected_files = [
             pathlib.Path(f"{output_root}.{split}.mgf")
-            for split in ("train", "validation", "test")
+            for split in ("train", "val", "test")
         ]
         expected_files.append(pathlib.Path(f"{output_root}.log"))
         existing = [f for f in expected_files if f.exists()]
@@ -151,10 +151,10 @@ def create_datasets(
             )
 
         # Handle existing splits if provided.
-        existing_peps = {"train": set(), "validation": set(), "test": set()}
-        existing_spectra = {"train": [], "validation": [], "test": []}
+        existing_peps = {"train": set(), "val": set(), "test": set()}
+        existing_spectra = {"train": [], "val": [], "test": []}
         if existing_splits is not None:
-            split_names = ("train", "validation", "test")
+            split_names = ("train", "val", "test")
             if len(existing_splits) != 3:
                 raise ValueError(
                     f"existing_splits must contain exactly three paths "
@@ -178,9 +178,9 @@ def create_datasets(
 
             # Validate mutual exclusivity of existing splits.
             for name_a, name_b in (
-                ("train", "validation"),
+                ("train", "val"),
                 ("train", "test"),
-                ("validation", "test"),
+                ("val", "test"),
             ):
                 shared = existing_peps[name_a] & existing_peps[name_b]
                 if shared:
@@ -191,9 +191,7 @@ def create_datasets(
                     )
 
             all_existing = (
-                existing_peps["train"]
-                | existing_peps["validation"]
-                | existing_peps["test"]
+                existing_peps["train"] | existing_peps["val"] | existing_peps["test"]
             )
             overlapping = all_existing & set(pep_dict.keys())
             logger.info(
@@ -201,7 +199,7 @@ def create_datasets(
             )
 
         # Partition peptides into pre-assigned and new.
-        pre_assigned = {"train": [], "validation": [], "test": []}
+        pre_assigned = {"train": [], "val": [], "test": []}
         new_peptides = []
         for pep in sorted(pep_dict.keys()):
             assigned = False
@@ -209,8 +207,8 @@ def create_datasets(
                 if pep in existing_peps["train"]:
                     pre_assigned["train"].append(pep)
                     assigned = True
-                elif pep in existing_peps["validation"]:
-                    pre_assigned["validation"].append(pep)
+                elif pep in existing_peps["val"]:
+                    pre_assigned["val"].append(pep)
                     assigned = True
                 elif pep in existing_peps["test"]:
                     pre_assigned["test"].append(pep)
@@ -225,7 +223,7 @@ def create_datasets(
             # counting ALL existing peptides (not just overlapping ones).
             total_peptides = (
                 len(existing_peps["train"])
-                + len(existing_peps["validation"])
+                + len(existing_peps["val"])
                 + len(existing_peps["test"])
                 + len(new_peptides)
             )
@@ -245,7 +243,7 @@ def create_datasets(
                 target_test = total_peptides - target_train - target_val
 
             need_train = max(0, target_train - len(existing_peps["train"]))
-            need_val = max(0, target_val - len(existing_peps["validation"]))
+            need_val = max(0, target_val - len(existing_peps["val"]))
             need_test = max(0, target_test - len(existing_peps["test"]))
 
             total_needed = need_train + need_val + need_test
@@ -282,7 +280,7 @@ def create_datasets(
                     test_new = []
 
             train_peps = pre_assigned["train"] + train_new
-            val_peps = pre_assigned["validation"] + val_new
+            val_peps = pre_assigned["val"] + val_new
             test_peps = pre_assigned["test"] + test_new
         else:
             # No existing splits: original behavior.
@@ -307,7 +305,7 @@ def create_datasets(
 
         splits = {
             "train": train_peps,
-            "validation": val_peps,
+            "val": val_peps,
             "test": test_peps,
         }
 
