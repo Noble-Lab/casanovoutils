@@ -286,6 +286,22 @@ class TestCreateDatasetsEdgeCases:
         with pytest.raises(ValueError, match="At least one MGF file"):
             create_datasets(output_root=str(tmp_path / "out"))
 
+    def test_missing_seq_raises_keyerror(self, tmp_path):
+        """Spectrum without 'seq' param should raise a KeyError."""
+        # Write an MGF with a spectrum that has no 'seq' param.
+        records = [
+            {
+                "params": {"pepmass": (100.0,)},
+                "m/z array": np.array([100.0]),
+                "intensity array": np.array([1.0]),
+            }
+        ]
+        mgf_path = tmp_path / "no_seq.mgf"
+        pyteomics.mgf.write(records, output=str(mgf_path))
+
+        with pytest.raises(KeyError, match="Missing 'seq'"):
+            create_datasets(str(mgf_path), output_root=str(tmp_path / "out"))
+
     def test_combine_with_existing_without_existing_splits_raises_error(self, tmp_path):
         """combine_with_existing=True without existing_splits should raise."""
         mgf = _write_mgf(
@@ -543,7 +559,7 @@ class TestCreateDatasetsOverwrite:
         # Create only the train file.
         (tmp_path / "out.train.mgf").write_text("")
 
-        with pytest.raises(FileExistsError, match="out.train.mgf"):
+        with pytest.raises(FileExistsError, match=r"out\.train\.mgf"):
             create_datasets(mgf, output_root=output_root)
 
     def test_no_error_without_existing_files(self, tmp_path):
