@@ -1,6 +1,5 @@
 """Create train/validation/test dataset splits from annotated MGF files."""
 
-import itertools
 import logging
 import pathlib
 import random
@@ -11,6 +10,10 @@ from typing import Optional
 import fire
 import pyteomics.mgf
 import tqdm
+
+
+# Number of spectra to buffer per output file before flushing to disk.
+_WRITE_BUFFER_SIZE = 1000
 
 
 def create_datasets(
@@ -120,14 +123,15 @@ def create_datasets(
     try:
         random.seed(random_seed)
 
-        pep_dict: dict[str, list] = {}
+        # --- Pass 1: Collect peptide counts only ---
+        pep_counts: dict[str, int] = {}
         total_spectra = 0
         for mgf_file in mgf_files:
             file_count = 0
             for spectrum_index, spectrum in enumerate(
                 tqdm.tqdm(
                     pyteomics.mgf.read(str(mgf_file), use_index=False),
-                    desc=f"Reading {mgf_file}",
+                    desc=f"Reading {mgf_file} (pass 1)",
                     unit="PSM",
                 ),
                 start=1,
@@ -139,20 +143,30 @@ def create_datasets(
                         f"Missing 'seq' in spectrum params for spectrum "
                         f"{spectrum_index} in file {mgf_file}"
                     ) from exc
-                pep_dict.setdefault(seq, []).append(spectrum)
+                pep_counts[seq] = pep_counts.get(seq, 0) + 1
                 file_count += 1
             logger.info(f"Read {file_count} spectra from {mgf_file}.")
             total_spectra += file_count
 
         logger.info(f"Total spectra read: {total_spectra}")
-        logger.info(f"Unique peptides: {len(pep_dict)}")
+        logger.info(f"Unique peptides: {len(pep_counts)}")
 
+        # --- Between passes: Compute sampling indices and split assignments ---
+
+        # Pre-compute which spectrum indices to keep for each peptide when
+        # spectra_per_peptide is set.
+        sampled_indices: dict[str, set[int]] = {}
         if spectra_per_peptide is not None:
-            spectra_before = sum(len(psms) for psms in pep_dict.values())
-            for pep, psms in pep_dict.items():
-                if len(psms) > spectra_per_peptide:
-                    pep_dict[pep] = random.sample(psms, spectra_per_peptide)
-            spectra_after = sum(len(psms) for psms in pep_dict.values())
+            spectra_before = sum(pep_counts.values())
+            spectra_after = 0
+            for pep, count in pep_counts.items():
+                if count > spectra_per_peptide:
+                    sampled_indices[pep] = set(
+                        random.sample(range(count), spectra_per_peptide)
+                    )
+                    spectra_after += spectra_per_peptide
+                else:
+                    spectra_after += count
             eliminated = spectra_before - spectra_after
             logger.info(
                 f"Spectra eliminated by spectra_per_peptide="
@@ -160,8 +174,11 @@ def create_datasets(
             )
 
         # Handle existing splits if provided.
-        existing_peps = {"train": set(), "val": set(), "test": set()}
-        existing_spectra = {"train": [], "val": [], "test": []}
+        existing_peps: dict[str, set[str]] = {
+            "train": set(),
+            "val": set(),
+            "test": set(),
+        }
         if existing_splits is not None:
             split_names = ("train", "val", "test")
             if len(existing_splits) != 3:
@@ -185,11 +202,10 @@ def create_datasets(
                             f"'{split_path}'"
                         ) from exc
                     existing_peps[split_name].add(seq)
-                    if combine_with_existing:
-                        existing_spectra[split_name].append(spectrum)
                 logger.info(
                     f"Existing {split_name}: "
-                    f"{len(existing_peps[split_name])} peptides"
+                    f"{len(existing_peps[split_name])} peptide"
+                    f"{'s' if len(existing_peps[split_name]) != 1 else ''}"
                 )
 
             # Validate mutual exclusivity of existing splits.
@@ -207,17 +223,23 @@ def create_datasets(
                     )
 
             all_existing = (
-                existing_peps["train"] | existing_peps["val"] | existing_peps["test"]
+                existing_peps["train"]
+                | existing_peps["val"]
+                | existing_peps["test"]
             )
-            overlapping = all_existing & set(pep_dict.keys())
+            overlapping = all_existing & set(pep_counts.keys())
             logger.info(
                 f"Peptides overlapping with existing splits: {len(overlapping)}"
             )
 
         # Partition peptides into pre-assigned and new.
-        pre_assigned = {"train": [], "val": [], "test": []}
-        new_peptides = []
-        for pep in sorted(pep_dict.keys()):
+        pre_assigned: dict[str, list[str]] = {
+            "train": [],
+            "val": [],
+            "test": [],
+        }
+        new_peptides: list[str] = []
+        for pep in sorted(pep_counts.keys()):
             assigned = False
             if existing_splits is not None:
                 if pep in existing_peps["train"]:
@@ -284,7 +306,9 @@ def create_datasets(
                     adjusted_total = adjusted_need_val + adjusted_need_test
                     if adjusted_total > 0:
                         val_count = round(
-                            len(remaining) * adjusted_need_val / adjusted_total
+                            len(remaining)
+                            * adjusted_need_val
+                            / adjusted_total
                         )
                     else:
                         val_count = 0
@@ -319,36 +343,125 @@ def create_datasets(
                 val_peps = new_peptides[n_train : n_train + n_val]
                 test_peps = new_peptides[n_train + n_val :]
 
-        splits = {
-            "train": train_peps,
-            "val": val_peps,
-            "test": test_peps,
+        # Build peptide -> split lookup for pass 2.
+        pep_to_split: dict[str, str] = {}
+        for pep in train_peps:
+            pep_to_split[pep] = "train"
+        for pep in val_peps:
+            pep_to_split[pep] = "val"
+        for pep in test_peps:
+            pep_to_split[pep] = "test"
+
+        # --- Pass 2: Stream spectra to output files ---
+        split_pep_sets = {
+            "train": set(train_peps),
+            "val": set(val_peps),
+            "test": set(test_peps),
         }
 
-        for split_name, peps in splits.items():
-            split_spectra = list(
-                itertools.chain.from_iterable(pep_dict[p] for p in peps)
-            )
+        outfiles = {
+            split: f"{output_root}.{split}.mgf"
+            for split in ("train", "val", "test")
+        }
+
+        # Track counts for logging.
+        split_spectra_counts: dict[str, int] = {
+            "train": 0,
+            "val": 0,
+            "test": 0,
+        }
+
+        # Open all output files simultaneously and stream.
+        with (
+            open(outfiles["train"], "w") as f_train,
+            open(outfiles["val"], "w") as f_val,
+            open(outfiles["test"], "w") as f_test,
+        ):
+            file_handles = {
+                "train": f_train,
+                "val": f_val,
+                "test": f_test,
+            }
+            buffers: dict[str, list] = {
+                "train": [],
+                "val": [],
+                "test": [],
+            }
+
+            def flush_buffer(split_name: str) -> None:
+                """Write buffered spectra to the output file."""
+                if buffers[split_name]:
+                    pyteomics.mgf.write(
+                        spectra=buffers[split_name],
+                        output=file_handles[split_name],
+                    )
+                    buffers[split_name].clear()
+
+            def write_spectrum(split_name: str, spectrum: dict) -> None:
+                """Buffer a spectrum and flush when buffer is full."""
+                buffers[split_name].append(spectrum)
+                split_spectra_counts[split_name] += 1
+                if len(buffers[split_name]) >= _WRITE_BUFFER_SIZE:
+                    flush_buffer(split_name)
+
+            # If combine_with_existing, stream existing split files first.
             if combine_with_existing:
-                split_spectra = existing_spectra[split_name] + split_spectra
-            outfile = f"{output_root}.{split_name}.mgf"
-            split_spectra_iter = tqdm.tqdm(
-                split_spectra,
-                desc=f"Writing {outfile}",
-                unit="PSM",
-            )
-            pyteomics.mgf.write(spectra=split_spectra_iter, output=outfile)
+                split_names = ("train", "val", "test")
+                for split_name, split_path in zip(
+                    split_names, existing_splits
+                ):
+                    for spectrum in tqdm.tqdm(
+                        pyteomics.mgf.read(
+                            str(split_path), use_index=False
+                        ),
+                        desc=f"Writing existing {split_name} (pass 2)",
+                        unit="PSM",
+                    ):
+                        write_spectrum(split_name, spectrum)
+
+            # Stream new input MGFs.
+            pep_counters: dict[str, int] = {}
+            for mgf_file in mgf_files:
+                for spectrum in tqdm.tqdm(
+                    pyteomics.mgf.read(str(mgf_file), use_index=False),
+                    desc=f"Writing {mgf_file} (pass 2)",
+                    unit="PSM",
+                ):
+                    seq = spectrum["params"]["seq"]
+
+                    # Apply spectra_per_peptide filtering.
+                    if spectra_per_peptide is not None:
+                        idx = pep_counters.get(seq, 0)
+                        pep_counters[seq] = idx + 1
+                        if seq in sampled_indices:
+                            if idx not in sampled_indices[seq]:
+                                continue
+                        # If seq not in sampled_indices, count <= limit,
+                        # so keep all.
+
+                    split_name = pep_to_split.get(seq)
+                    if split_name is not None:
+                        write_spectrum(split_name, spectrum)
+
+            # Flush remaining buffers.
+            for split_name in ("train", "val", "test"):
+                flush_buffer(split_name)
+
+        # Log split summaries.
+        for split_name in ("train", "val", "test"):
+            peps = split_pep_sets[split_name]
+            count = split_spectra_counts[split_name]
             if combine_with_existing:
-                new_pep_count = len(set(peps) - existing_peps[split_name])
-                total_peps = len(set(peps) | existing_peps[split_name])
+                new_pep_count = len(peps - existing_peps[split_name])
+                total_peps = len(peps | existing_peps[split_name])
                 logger.info(
-                    f"{split_name}: {len(split_spectra)} spectra, "
+                    f"{split_name}: {count} spectra, "
                     f"{new_pep_count} new peptides, "
                     f"{total_peps} total peptides"
                 )
             else:
                 logger.info(
-                    f"{split_name}: {len(split_spectra)} spectra, "
+                    f"{split_name}: {count} spectra, "
                     f"{len(peps)} peptides"
                 )
     finally:
