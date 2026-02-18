@@ -157,7 +157,6 @@ def create_datasets(
         # spectra_per_peptide is set.
         sampled_indices: dict[str, set[int]] = {}
         if spectra_per_peptide is not None:
-            spectra_before = sum(pep_counts.values())
             spectra_after = 0
             for pep, count in pep_counts.items():
                 if count > spectra_per_peptide:
@@ -167,7 +166,7 @@ def create_datasets(
                     spectra_after += spectra_per_peptide
                 else:
                     spectra_after += count
-            eliminated = spectra_before - spectra_after
+            eliminated = total_spectra - spectra_after
             logger.info(
                 f"Spectra eliminated by spectra_per_peptide="
                 f"{spectra_per_peptide}: {eliminated}"
@@ -273,10 +272,9 @@ def create_datasets(
                 target_train = total_peptides - target_val - target_test
             else:
                 logger.warning(
-                    "Fewer than 3 peptides available across existing and "
-                    "new data (%d peptides). One or more of the "
-                    "train/validation/test splits may be empty.",
-                    total_peptides,
+                    f"Fewer than 3 peptides available across existing and "
+                    f"new data ({total_peptides} peptides). One or more of "
+                    f"the train/validation/test splits may be empty."
                 )
                 target_train = round(total_peptides * 0.8)
                 target_val = round(total_peptides * 0.1)
@@ -329,9 +327,8 @@ def create_datasets(
             n = len(new_peptides)
             if n < 3:
                 logger.warning(
-                    "Only %d unique peptides available; assigning all to "
-                    "training set and leaving validation/test splits empty.",
-                    n,
+                    f"Only {n} unique peptides available; assigning all to "
+                    f"training set and leaving validation/test splits empty."
                 )
                 train_peps = new_peptides
                 val_peps = []
