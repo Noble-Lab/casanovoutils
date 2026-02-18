@@ -217,10 +217,16 @@ def create_datasets(
             ):
                 shared = existing_peps[name_a] & existing_peps[name_b]
                 if shared:
+                    examples = sorted(shared)[:5]
+                    suffix = (
+                        f" (and {len(shared) - 5} more)"
+                        if len(shared) > 5
+                        else ""
+                    )
                     raise ValueError(
                         f"Peptide(s) found in multiple existing splits "
                         f"({name_a}, {name_b}): "
-                        f"{', '.join(sorted(shared))}"
+                        f"{', '.join(examples)}{suffix}"
                     )
 
             all_existing = (
