@@ -187,7 +187,9 @@ def create_datasets(
                     f"(train, validation, test), but {len(existing_splits)} "
                     f"were provided."
                 )
-            for split_name, split_path in zip(split_names, existing_splits):
+            for split_name, split_path in zip(
+                split_names, existing_splits, strict=True
+            ):
                 for spectrum in tqdm.tqdm(
                     pyteomics.mgf.read(str(split_path), use_index=False),
                     desc=f"Reading existing {split_name}",
@@ -408,7 +410,7 @@ def create_datasets(
             if combine_with_existing:
                 split_names = ("train", "val", "test")
                 for split_name, split_path in zip(
-                    split_names, existing_splits
+                    split_names, existing_splits, strict=True
                 ):
                     for spectrum in tqdm.tqdm(
                         pyteomics.mgf.read(
