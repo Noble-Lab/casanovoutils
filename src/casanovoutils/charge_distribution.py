@@ -14,9 +14,11 @@ from os import PathLike
 from typing import Iterable
 
 import fire
+# isort: off
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# isort: on
 from pyteomics import mgf
 
 
@@ -81,8 +83,10 @@ def charge_distribution(
         print(f"  charge {charge}: {counts[charge]}", file=sys.stderr)
 
     if not counts:
-        print("  Warning: no spectra with valid charge states found.",
-              file=sys.stderr)
+        print(
+            "  Warning: no spectra with valid charge states found.",
+            file=sys.stderr,
+        )
 
     # -- TSV output (sorted by charge) ----------------------------------------
     with open(output_tsv, "w", newline="") as fh:
