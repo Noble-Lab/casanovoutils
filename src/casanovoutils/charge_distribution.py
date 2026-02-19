@@ -33,12 +33,12 @@ def count_charge_states(spectra: Iterable) -> tuple[dict[int, int], int]:
     counts : dict[int, int]
         Mapping of charge state to count.
     n_skipped : int
-        Number of spectra skipped due to multiple charge states.
+        Number of spectra skipped (missing, empty, or multiple charge states).
     """
     counts = {}
     n_skipped = 0
     for spectrum in spectra:
-        charge_raw = spectrum["params"].get("charge", [2])
+        charge_raw = spectrum["params"].get("charge", [])
         if isinstance(charge_raw, list):
             if len(charge_raw) != 1:
                 n_skipped += 1
@@ -59,11 +59,11 @@ def charge_distribution(
 
     Parameters
     ----------
-    mgf_file : str
+    mgf_file : PathLike
         Input MGF file.
-    output_tsv : str
+    output_tsv : PathLike
         Output TSV path (default: charge_distribution.tsv).
-    output_plot : str
+    output_plot : PathLike
         Output bar chart path (default: charge_distribution.png).
     """
     with mgf.MGF(mgf_file) as reader:
@@ -79,6 +79,10 @@ def charge_distribution(
         )
     for charge in sorted(counts):
         print(f"  charge {charge}: {counts[charge]}", file=sys.stderr)
+
+    if not counts:
+        print("  Warning: no spectra with valid charge states found.",
+              file=sys.stderr)
 
     # -- TSV output (sorted by charge) ----------------------------------------
     with open(output_tsv, "w", newline="") as fh:

@@ -1,7 +1,4 @@
 import csv
-import pathlib
-
-import pytest
 
 from casanovoutils.charge_distribution import count_charge_states, charge_distribution
 
@@ -71,6 +68,17 @@ def test_count_charge_states_empty_charge_list_skipped():
     ]
     counts, n_skipped = count_charge_states(spectra)
     assert counts == {2: 1}
+    assert n_skipped == 1
+
+
+def test_count_charge_states_missing_charge_skipped():
+    """Spectra with no charge key are skipped."""
+    spectra = [
+        {"params": {}},  # no charge key — skip
+        _spectrum(3),
+    ]
+    counts, n_skipped = count_charge_states(spectra)
+    assert counts == {3: 1}
     assert n_skipped == 1
 
 
