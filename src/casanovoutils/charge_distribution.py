@@ -28,17 +28,24 @@ def count_charge_states(spectra):
 
     Returns
     -------
-    dict[int, int]
+    counts : dict[int, int]
         Mapping of charge state to count.
+    n_skipped : int
+        Number of spectra skipped due to multiple charge states.
     """
     counts = {}
+    n_skipped = 0
     for spectrum in spectra:
         charge_raw = spectrum["params"].get("charge", [2])
-        charge = (
-            int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
-        )
+        if isinstance(charge_raw, list):
+            if len(charge_raw) != 1:
+                n_skipped += 1
+                continue
+            charge = int(charge_raw[0])
+        else:
+            charge = int(charge_raw)
         counts[charge] = counts.get(charge, 0) + 1
-    return counts
+    return counts, n_skipped
 
 
 def charge_distribution(
@@ -57,10 +64,17 @@ def charge_distribution(
     output_plot : str
         Output bar chart path (default: charge_distribution.png).
     """
-    counts = count_charge_states(mgf.MGF(mgf_file))
+    with mgf.MGF(mgf_file) as reader:
+        counts, n_skipped = count_charge_states(reader)
 
     total = sum(counts.values())
-    print(f"Processed {total} spectra total.", file=sys.stderr)
+    print(f"Processed {total + n_skipped} spectra total.", file=sys.stderr)
+    if n_skipped:
+        print(
+            f"  Warning: {n_skipped} spectra with multiple or missing charge"
+            " states were skipped.",
+            file=sys.stderr,
+        )
     for charge in sorted(counts):
         print(f"  charge {charge}: {counts[charge]}", file=sys.stderr)
 
@@ -79,7 +93,7 @@ def charge_distribution(
     ax.bar([str(c) for c in charges], vals, edgecolor="black", linewidth=0.5)
     ax.set_xlabel("Charge state")
     ax.set_ylabel("Number of spectra")
-    ax.set_title(f"Charge state distribution  (n={total:,})")
+    ax.set_title(f"Charge state distribution (n={total:,})")
     fig.tight_layout()
     fig.savefig(output_plot, dpi=150)
     plt.close(fig)

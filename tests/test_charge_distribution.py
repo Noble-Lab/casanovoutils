@@ -12,27 +12,66 @@ from casanovoutils.charge_distribution import count_charge_states, charge_distri
 
 
 def _spectrum(charge):
-    """Create a minimal spectrum dict with the given charge."""
+    """Create a minimal spectrum dict with the given charge (as a list)."""
     return {"params": {"charge": [charge]}}
 
 
 def test_count_charge_states_mixed():
     """Multiple spectra with mixed charges produce correct counts."""
     spectra = [_spectrum(2), _spectrum(3), _spectrum(2), _spectrum(4), _spectrum(3)]
-    counts = count_charge_states(spectra)
+    counts, n_skipped = count_charge_states(spectra)
     assert counts == {2: 2, 3: 2, 4: 1}
+    assert n_skipped == 0
 
 
 def test_count_charge_states_single():
     """All spectra with the same charge produce a single entry."""
     spectra = [_spectrum(2), _spectrum(2), _spectrum(2)]
-    counts = count_charge_states(spectra)
+    counts, n_skipped = count_charge_states(spectra)
     assert counts == {2: 3}
+    assert n_skipped == 0
 
 
 def test_count_charge_states_empty():
     """Empty input produces an empty dict."""
-    assert count_charge_states([]) == {}
+    counts, n_skipped = count_charge_states([])
+    assert counts == {}
+    assert n_skipped == 0
+
+
+def test_count_charge_states_scalar_charge():
+    """Charge returned as a single integer (not a list) is handled."""
+    spectra = [
+        {"params": {"charge": 2}},
+        {"params": {"charge": 3}},
+        {"params": {"charge": 2}},
+    ]
+    counts, n_skipped = count_charge_states(spectra)
+    assert counts == {2: 2, 3: 1}
+    assert n_skipped == 0
+
+
+def test_count_charge_states_multiple_charges_skipped():
+    """Spectra with multiple charge states are skipped."""
+    spectra = [
+        _spectrum(2),
+        {"params": {"charge": [2, 3]}},  # ambiguous — skip
+        _spectrum(3),
+    ]
+    counts, n_skipped = count_charge_states(spectra)
+    assert counts == {2: 1, 3: 1}
+    assert n_skipped == 1
+
+
+def test_count_charge_states_empty_charge_list_skipped():
+    """Spectra with an empty charge list are skipped."""
+    spectra = [
+        _spectrum(2),
+        {"params": {"charge": []}},  # empty — skip
+    ]
+    counts, n_skipped = count_charge_states(spectra)
+    assert counts == {2: 1}
+    assert n_skipped == 1
 
 
 # ---------------------------------------------------------------------------
