@@ -10,6 +10,8 @@ Requires: pyteomics, matplotlib
 
 import csv
 import sys
+from os import PathLike
+from typing import Iterable
 
 import fire
 import matplotlib
@@ -18,7 +20,7 @@ import matplotlib.pyplot as plt
 from pyteomics import mgf
 
 
-def count_charge_states(spectra):
+def count_charge_states(spectra: Iterable) -> tuple[dict[int, int], int]:
     """Count precursor charge states across spectra.
 
     Parameters
@@ -49,10 +51,10 @@ def count_charge_states(spectra):
 
 
 def charge_distribution(
-    mgf_file,
-    output_tsv="charge_distribution.tsv",
-    output_plot="charge_distribution.png",
-):
+    mgf_file: PathLike,
+    output_tsv: PathLike = "charge_distribution.tsv",
+    output_plot: PathLike = "charge_distribution.png",
+) -> None:
     """Charge state distribution for an MGF file.
 
     Parameters
@@ -100,7 +102,7 @@ def charge_distribution(
     print(f"Wrote {output_plot}", file=sys.stderr)
 
 
-def main():
+def main() -> None:
     fire.Fire(charge_distribution)
 
 
