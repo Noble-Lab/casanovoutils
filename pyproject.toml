@@ -23,6 +23,7 @@ casanovo-utils = "casanovoutils:main"
 mgf-utils = "casanovoutils.mgfutils:main"
 downsample-ms = "casanovoutils.downsample:main"
 graph-prec-cov = "casanovoutils.preccov:main"
+charge-distribution = "casanovoutils.charge_distribution:main"
 
 [build-system]
 requires = ["hatchling"]
