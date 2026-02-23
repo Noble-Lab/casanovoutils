@@ -40,15 +40,13 @@ summarize-mgf:
     and embedded histograms for charge state distribution, peaks per spectrum,
     peptide lengths, and fragment ion coverage.
 
-Requires: pyteomics, numpy, matplotlib
+Requires: pyteomics, spectrum_utils, numpy, matplotlib
 """
 
-import base64
 import csv
-import io
 import os
-import re
 import sys
+from collections import Counter
 from os import PathLike
 from typing import Iterable
 
@@ -59,29 +57,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 # isort: on
 import numpy as np
-from pyteomics import mgf, mass
-
-# ---------------------------------------------------------------------------
-# Fragment coverage — physical constants
-# ---------------------------------------------------------------------------
-PROTON_MASS = 1.00727646677
-H2O_MASS = 18.01056468
-
-# Standard amino acid residue masses (monoisotopic)
-AA_MASS = mass.std_aa_mass.copy()
-
-# Modification delta masses (monoisotopic, from Unimod)
-MOD_MASS = {
-    "Acetyl": 42.010565,
-    "Ammonia-loss": -17.026549,
-    "Carbamidomethyl": 57.021464,
-    "Carbamyl": 43.005814,
-    "Deamidated": 0.984016,
-    "Oxidation": 15.994915,
-}
-
-# Neutral losses applied to every b/y ion (Da)
-NEUTRAL_LOSSES = [0.0, 17.026549, 18.010565]  # none, NH3, H2O
+from pyteomics import mgf, proforma as pyteomics_proforma
+from spectrum_utils.spectrum import MsmsSpectrum
 
 # ---------------------------------------------------------------------------
 # Shared plot helpers
@@ -120,122 +97,6 @@ def _make_histogram_fig(
     return fig
 
 
-def _fig_to_base64(fig) -> str:
-    """Encode a matplotlib figure as a base64 PNG string and close it."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("ascii")
-
-
-# ---------------------------------------------------------------------------
-# Fragment coverage — ProForma parsing
-# ---------------------------------------------------------------------------
-
-
-def parse_proforma(seq_str):
-    """Parse a ProForma sequence string.
-
-    Returns (n_term_mod_mass, list_of_residue_masses) or None if the
-    sequence contains an unrecognised modification or amino acid.
-    """
-    n_term_mod = 0.0
-
-    # N-terminal modification: [Mod]-
-    m = re.match(r"^\[([^\]]+)\]-", seq_str)
-    if m:
-        mod = m.group(1)
-        if mod not in MOD_MASS:
-            return None
-        n_term_mod = MOD_MASS[mod]
-        seq_str = seq_str[m.end():]
-
-    residue_masses = []
-    i = 0
-    while i < len(seq_str):
-        aa = seq_str[i]
-        if aa not in AA_MASS:
-            return None
-        rm = AA_MASS[aa]
-        i += 1
-        # Collect any bracketed modifications on this residue
-        while i < len(seq_str) and seq_str[i] == "[":
-            j = seq_str.index("]", i)
-            mod = seq_str[i + 1 : j]
-            if mod not in MOD_MASS:
-                return None
-            rm += MOD_MASS[mod]
-            i = j + 1
-        residue_masses.append(rm)
-
-    return n_term_mod, residue_masses
-
-
-# ---------------------------------------------------------------------------
-# Fragment coverage — theoretical fragment computation
-# ---------------------------------------------------------------------------
-
-
-def theoretical_mzs(n_term_mod, residue_masses, precursor_charge):
-    """Return sorted array of theoretical b/y m/z values incl. neutral losses.
-
-    Fragment charge states range from 1 to max(precursor_charge - 1, 1).
-    """
-    n = len(residue_masses)
-    if n < 2:
-        return np.array([])
-
-    cum = np.cumsum(residue_masses)
-    max_z = max(precursor_charge - 1, 1)
-
-    mzs = []
-    for i in range(1, n):
-        # b_i neutral mass = sum of first i residues + N-term mod
-        b_neutral = cum[i - 1] + n_term_mod
-        # y_(n-i) neutral mass = sum of last (n-i) residues + H2O
-        y_neutral = cum[-1] - cum[i - 1] + H2O_MASS
-
-        for nl in NEUTRAL_LOSSES:
-            bn = b_neutral - nl
-            yn = y_neutral - nl
-            for z in range(1, max_z + 1):
-                if bn > 0:
-                    mzs.append((bn + z * PROTON_MASS) / z)
-                if yn > 0:
-                    mzs.append((yn + z * PROTON_MASS) / z)
-
-    return np.sort(mzs)
-
-
-# ---------------------------------------------------------------------------
-# Fragment coverage — peak matching
-# ---------------------------------------------------------------------------
-
-
-def matched_proportion(obs_mz, obs_int, theo, tolerance, tol_unit="ppm"):
-    """Fraction of observed intensity matched by any theoretical m/z.
-
-    Returns (n_matched_peaks, proportion).
-    """
-    total = obs_int.sum()
-    if total == 0 or len(theo) == 0:
-        return 0, 0.0
-
-    order = np.argsort(obs_mz)
-    mz_s = obs_mz[order]
-    int_s = obs_int[order]
-    matched = np.zeros(len(mz_s), dtype=bool)
-
-    for t in theo:
-        tol = t * tolerance * 1e-6 if tol_unit == "ppm" else tolerance
-        lo = np.searchsorted(mz_s, t - tol, side="left")
-        hi = np.searchsorted(mz_s, t + tol, side="right")
-        matched[lo:hi] = True
-
-    return int(matched.sum()), int_s[matched].sum() / total
-
-
 # ---------------------------------------------------------------------------
 # Charge distribution
 # ---------------------------------------------------------------------------
@@ -256,7 +117,7 @@ def count_charge_states(spectra: Iterable) -> tuple[dict[int, int], int]:
     n_skipped : int
         Number of spectra skipped (missing, empty, or multiple charge states).
     """
-    counts = {}
+    counts: Counter[int] = Counter()
     n_skipped = 0
     for spectrum in spectra:
         charge_raw = spectrum["params"].get("charge", [])
@@ -267,7 +128,7 @@ def count_charge_states(spectra: Iterable) -> tuple[dict[int, int], int]:
             charge = int(charge_raw[0])
         else:
             charge = int(charge_raw)
-        counts[charge] = counts.get(charge, 0) + 1
+        counts[charge] += 1
     return counts, n_skipped
 
 
@@ -351,10 +212,7 @@ def peak_counts(
     with mgf.MGF(mgf_file) as reader:
         counts_list = count_peaks(reader)
 
-    counts_map: dict[int, int] = {}
-    for n in counts_list:
-        counts_map[n] = counts_map.get(n, 0) + 1
-
+    counts_map = Counter(counts_list)
     total = len(counts_list)
     print(f"Processed {total} spectra total.", file=sys.stderr)
 
@@ -388,9 +246,9 @@ def peak_counts(
 
 
 def measure_peptide_lengths(spectra: Iterable) -> tuple[list[int], int]:
-    """Return (lengths, n_skipped) using parse_proforma for residue count.
+    """Return (lengths, n_skipped) for annotated spectra.
 
-    Spectra without SEQ= or with unrecognised modifications are counted
+    Spectra without SEQ= or with invalid ProForma sequences are counted
     as skipped.
     """
     lengths = []
@@ -400,12 +258,12 @@ def measure_peptide_lengths(spectra: Iterable) -> tuple[list[int], int]:
         if not seq:
             n_skipped += 1
             continue
-        parsed = parse_proforma(seq)
-        if parsed is None:
+        try:
+            parsed_seq, _ = pyteomics_proforma.parse(seq)
+            lengths.append(len(parsed_seq))
+        except Exception:
             n_skipped += 1
             continue
-        _, residue_masses = parsed
-        lengths.append(len(residue_masses))
     return lengths, n_skipped
 
 
@@ -437,9 +295,7 @@ def peptide_lengths(
             file=sys.stderr,
         )
 
-    counts_map: dict[int, int] = {}
-    for length in lengths:
-        counts_map[length] = counts_map.get(length, 0) + 1
+    counts_map = Counter(lengths)
 
     # -- TSV output (sorted by length) ----------------------------------------
     with open(output_tsv, "w", newline="") as fh:
@@ -476,23 +332,22 @@ def _compute_coverage_results(
     spectra,
     tolerance: float = 10.0,
     tolerance_unit: str = "ppm",
-) -> tuple[list, int, set]:
+) -> tuple[list, int]:
     """Compute fragment ion coverage for all spectra.
 
-    Returns (results, n_skipped, unknown_mods).
+    Returns (results, n_skipped).
     results is a list of (scan, filename, seq, charge, n_peaks, n_matched, prop).
     """
     results = []
     n_skipped = 0
-    unknown_mods: set = set()
 
     count = 0
-    for spectrum in spectra:
+    for spectrum_data in spectra:
         count += 1
         if count % 10000 == 0:
             print(f"  {count} spectra processed ...", file=sys.stderr)
 
-        params = spectrum["params"]
+        params = spectrum_data["params"]
         scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
         filename = str(params.get("filename", ""))
         seq = params.get("seq", "")
@@ -500,30 +355,54 @@ def _compute_coverage_results(
         charge = (
             int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
         )
+        pepmass_raw = params.get("pepmass", (0.0,))
+        precursor_mz = float(
+            pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
+        )
 
         if not seq:
             n_skipped += 1
             continue
 
-        parsed = parse_proforma(seq)
-        if parsed is None:
-            for mod in re.findall(r"\[([^\]]+)\]", seq):
-                if mod not in MOD_MASS:
-                    unknown_mods.add(mod)
+        obs_mz = spectrum_data["m/z array"]
+        obs_int = spectrum_data["intensity array"]
+
+        try:
+            spectrum = MsmsSpectrum(
+                identifier=scan,
+                precursor_mz=precursor_mz,
+                precursor_charge=charge,
+                mz=obs_mz,
+                intensity=obs_int.astype(np.float32),
+            )
+            spectrum.annotate_proforma(
+                seq,
+                fragment_tol_mass=tolerance,
+                fragment_tol_mode=tolerance_unit,
+                ion_types="by",
+                neutral_losses=True,
+            )
+        except Exception as e:
+            print(f"  Skipping scan {scan} ({seq!r}): {e}", file=sys.stderr)
             n_skipped += 1
             continue
 
-        n_term_mod, res_masses = parsed
-        theo = theoretical_mzs(n_term_mod, res_masses, charge)
-        obs_mz = spectrum["m/z array"]
-        obs_int = spectrum["intensity array"]
-        n_peaks = len(obs_mz)
-        n_matched, prop = matched_proportion(
-            obs_mz, obs_int, theo, tolerance, tolerance_unit
+        n_peaks = len(obs_int)
+        n_matched = sum(
+            1 for ann in spectrum.annotation
+            if len(ann.fragment_annotations) > 0
         )
+        matched_intensity = sum(
+            spectrum.intensity[i]
+            for i, ann in enumerate(spectrum.annotation)
+            if len(ann.fragment_annotations) > 0
+        )
+        total_intensity = spectrum.intensity.sum()
+        prop = float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+
         results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
 
-    return results, n_skipped, unknown_mods
+    return results, n_skipped
 
 
 # ---------------------------------------------------------------------------
@@ -559,18 +438,13 @@ def fragment_coverage(
         )
 
     with mgf.MGF(mgf_file) as reader:
-        results, n_skipped, unknown_mods = _compute_coverage_results(
+        results, n_skipped = _compute_coverage_results(
             reader, tolerance, tolerance_unit
         )
 
     count = len(results) + n_skipped
     print(f"Processed {count} spectra total.", file=sys.stderr)
     print(f"  {len(results)} scored, {n_skipped} skipped.", file=sys.stderr)
-    if unknown_mods:
-        print(
-            f"  Unknown modifications (spectra skipped): {unknown_mods}",
-            file=sys.stderr,
-        )
 
     # -- TSV output (sorted by proportion_matched) ----------------------------
     results.sort(key=lambda r: r[6])
@@ -822,21 +696,15 @@ def summarize_mgf(
 
             # -- Fragment coverage (only if sequences present) ----------------
             coverage_results_list: list = []
-            unknown_mods: set = set()
             if n_with_seq > 0:
                 print("Computing fragment ion coverage ...", file=sys.stderr)
-                coverage_results_list, _, unknown_mods = _compute_coverage_results(
+                coverage_results_list, _ = _compute_coverage_results(
                     spectra, tolerance, tolerance_unit
                 )
                 print(
                     f"  {len(coverage_results_list):,} spectra scored.",
                     file=sys.stderr,
                 )
-                if unknown_mods:
-                    print(
-                        f"  Unknown modifications: {unknown_mods}",
-                        file=sys.stderr,
-                    )
 
             # -- Write TSV files ----------------------------------------------
             print("Writing TSV files ...", file=sys.stderr)
@@ -856,9 +724,7 @@ def summarize_mgf(
                 [(c, charge_counts[c]) for c in sorted(charge_counts)],
             )
 
-            peaks_counts_map: dict[int, int] = {}
-            for n in peak_counts_list:
-                peaks_counts_map[n] = peaks_counts_map.get(n, 0) + 1
+            peaks_counts_map = Counter(peak_counts_list)
             peaks_tsv = os.path.join(output_root, "peak_counts.tsv")
             _write_tsv(
                 peaks_tsv,
@@ -868,9 +734,7 @@ def summarize_mgf(
 
             lengths_png: str | None = None
             if lengths:
-                lengths_counts_map: dict[int, int] = {}
-                for ln in lengths:
-                    lengths_counts_map[ln] = lengths_counts_map.get(ln, 0) + 1
+                lengths_counts_map = Counter(lengths)
                 lengths_tsv = os.path.join(output_root, "peptide_lengths.tsv")
                 _write_tsv(
                     lengths_tsv,
