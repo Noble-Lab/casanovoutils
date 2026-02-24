@@ -6,6 +6,7 @@ from casanovoutils.summarize_mgf import (
     charge_distribution,
     count_charge_states,
     count_peaks,
+    fragment_coverage,
     measure_peptide_lengths,
     peak_counts,
     peptide_lengths,
@@ -391,3 +392,91 @@ def test_summarize_mgf_integration(tmp_path):
 
     # Log file exists
     assert (out_dir / "summary.log").exists()
+
+
+# ---------------------------------------------------------------------------
+# fragment_coverage integration test
+# ---------------------------------------------------------------------------
+
+SMALL_MGF_ANNOTATED = """\
+BEGIN IONS
+TITLE=spec1
+PEPMASS=500.26 100.0
+CHARGE=2+
+SEQ=AGK
+100.0 10
+200.0 20
+300.0 5
+END IONS
+
+BEGIN IONS
+TITLE=spec2
+PEPMASS=701.37 80.0
+CHARGE=2+
+SEQ=PEPTIDE
+120.0 12
+220.0 22
+320.0 8
+END IONS
+"""
+
+
+def test_fragment_coverage_integration(tmp_path):
+    """fragment_coverage writes a summary TSV, a per-spectrum TSV, and a PNG."""
+    mgf_path = tmp_path / "test.mgf"
+    mgf_path.write_text(SMALL_MGF_ANNOTATED)
+
+    tsv_path = tmp_path / "coverage.tsv"
+    full_tsv_path = tmp_path / "coverage.full.tsv"
+    png_path = tmp_path / "coverage.png"
+
+    fragment_coverage(
+        str(mgf_path),
+        output_tsv=str(tsv_path),
+        output_full_tsv=str(full_tsv_path),
+        output_plot=str(png_path),
+    )
+
+    # Summary TSV exists and has a row per scored spectrum, sorted by coverage
+    assert tsv_path.exists()
+    with open(tsv_path) as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert len(rows) == 2
+    proportions = [float(r["proportion_matched"]) for r in rows]
+    assert proportions == sorted(proportions)  # sorted ascending
+
+    # Full per-spectrum TSV has one row per spectrum
+    assert full_tsv_path.exists()
+    with open(full_tsv_path) as fh:
+        full_rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert len(full_rows) == 2
+    assert set(full_rows[0].keys()) == {"scan", "peptide", "charge", "coverage"}
+
+    assert png_path.exists()
+    assert png_path.stat().st_size > 0
+
+
+def test_fragment_coverage_workers_match(tmp_path):
+    """fragment_coverage with workers=2 produces the same results as workers=1."""
+    mgf_path = tmp_path / "test.mgf"
+    mgf_path.write_text(SMALL_MGF_ANNOTATED)
+
+    def _run(workers, suffix):
+        fragment_coverage(
+            str(mgf_path),
+            output_tsv=str(tmp_path / f"cov{suffix}.tsv"),
+            output_full_tsv=str(tmp_path / f"cov_full{suffix}.tsv"),
+            output_plot=str(tmp_path / f"cov{suffix}.png"),
+            workers=workers,
+        )
+        with open(tmp_path / f"cov_full{suffix}.tsv") as fh:
+            return list(csv.DictReader(fh, delimiter="\t"))
+
+    rows1 = _run(1, "_w1")
+    rows2 = _run(2, "_w2")
+
+    # Same set of scans and coverages regardless of worker count
+    assert {r["scan"] for r in rows1} == {r["scan"] for r in rows2}
+    cov1 = {r["scan"]: r["coverage"] for r in rows1}
+    cov2 = {r["scan"]: r["coverage"] for r in rows2}
+    assert cov1 == cov2

@@ -44,6 +44,7 @@ Requires: pyteomics, spectrum_utils, numpy, matplotlib
 """
 
 import csv
+import html as html_mod
 import os
 import sys
 from collections import Counter
@@ -62,7 +63,7 @@ try:
     from lark.exceptions import LarkError
     from pyteomics import mgf, proforma as pyteomics_proforma
     from spectrum_utils.spectrum import MsmsSpectrum
-except Exception as e:
+except ImportError as e:
     print(f"Error: failed to import required packages: {e}", file=sys.stderr)
     print("Try: pip install --upgrade spectrum_utils numba pyteomics", file=sys.stderr)
     sys.exit(1)
@@ -314,7 +315,7 @@ def peak_counts(
         )
         fig.savefig(output_plot, dpi=150)
         plt.close(fig)
-    print(f"Wrote {output_plot}", file=sys.stderr)
+        print(f"Wrote {output_plot}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +398,7 @@ def peptide_lengths(
         )
         fig.savefig(output_plot, dpi=150)
         plt.close(fig)
-    print(f"Wrote {output_plot}", file=sys.stderr)
+        print(f"Wrote {output_plot}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +715,7 @@ def fragment_coverage(
     with open(output_full_tsv, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["scan", "peptide", "charge", "coverage"])
-        for scan, filename, seq, charge, n_peaks, n_matched, prop in results:
+        for scan, _, seq, charge, _, _, prop in results:
             w.writerow([scan, seq, charge, f"{prop:.6f}"])
     print(f"Wrote {output_full_tsv}", file=sys.stderr)
 
@@ -839,7 +840,7 @@ def _build_summary_html(
     coverage_section = ""
     if coverage_png is not None:
         max_charge_label = (
-            "precursor charge" if max_charge == "max" else "precursor charge − 1"
+            "precursor charge" if max_charge == "max" else "precursor charge - 1"
         )
         coverage_params = _table(
             ["Parameter", "Value"],
@@ -882,15 +883,16 @@ def _build_summary_html(
     charge_img = _img(charge_png) if charge_png else ""
     peaks_img = _img(peaks_png) if peaks_png else ""
 
+    safe_name = html_mod.escape(os.path.basename(mgf_file))
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>MGF Summary: {os.path.basename(mgf_file)}</title>
+<title>MGF Summary: {safe_name}</title>
 <style>{css}</style>
 </head>
 <body>
-<h1>MGF Summary: {os.path.basename(mgf_file)}</h1>
+<h1>MGF Summary: {safe_name}</h1>
 <h2>Overview</h2>
 {overview}
 {mods_section}
@@ -925,6 +927,12 @@ class _Tee:
     def flush(self):
         for s in self._streams:
             s.flush()
+
+    def isatty(self):
+        return False
+
+    def fileno(self):
+        raise AttributeError("_Tee does not support fileno()")
 
 
 # ---------------------------------------------------------------------------
@@ -990,54 +998,62 @@ def summarize_mgf(
 
             mod_counts: Counter[tuple[str, str]] = Counter()
 
+            n_parse_errors = 0
             print("Reading spectra ...", file=sys.stderr)
-            for spectrum_data in mgf.MGF(mgf_file):
-                total_spectra += 1
-                if total_spectra % 10000 == 0:
-                    print(
-                        f"  {total_spectra:,} spectra loaded ...",
-                        file=sys.stderr,
-                    )
+            with mgf.MGF(mgf_file) as reader:
+                for spectrum_data in reader:
+                    total_spectra += 1
+                    if total_spectra % 10000 == 0:
+                        print(
+                            f"  {total_spectra:,} spectra loaded ...",
+                            file=sys.stderr,
+                        )
 
-                params = spectrum_data["params"]
+                    params = spectrum_data["params"]
 
-                # Charge distribution
-                charge_raw = params.get("charge", [])
-                if isinstance(charge_raw, list):
-                    if len(charge_raw) == 1:
-                        charge_counts[int(charge_raw[0])] += 1
-                else:
-                    charge_counts[int(charge_raw)] += 1
+                    # Charge distribution
+                    charge_raw = params.get("charge", [])
+                    if isinstance(charge_raw, list):
+                        if len(charge_raw) == 1:
+                            charge_counts[int(charge_raw[0])] += 1
+                    else:
+                        charge_counts[int(charge_raw)] += 1
 
-                # Peak counts
-                n_peaks = len(spectrum_data["m/z array"])
-                peak_counts_counter[n_peaks] += 1
+                    # Peak counts
+                    n_peaks = len(spectrum_data["m/z array"])
+                    peak_counts_counter[n_peaks] += 1
 
-                # Sequence-based analyses (length + modifications — no annotation)
-                seq = params.get("seq", "")
-                if not seq:
-                    continue
+                    # Sequence-based analyses (length + modifications — no annotation)
+                    seq = params.get("seq", "")
+                    if not seq:
+                        continue
 
-                n_with_seq += 1
-                try:
-                    parsed_seq, props = pyteomics_proforma.parse(seq)
-                    length_counts[len(parsed_seq)] += 1
-                    for residue, mods in parsed_seq:
-                        for mod in (mods or []):
-                            mod_counts[(residue, str(mod))] += 1
-                    for mod in (props.get("n_term") or []):
-                        mod_counts[("N-term", str(mod))] += 1
-                    for mod in (props.get("c_term") or []):
-                        mod_counts[("C-term", str(mod))] += 1
-                except Exception:
-                    pass
+                    n_with_seq += 1
+                    try:
+                        parsed_seq, props = pyteomics_proforma.parse(seq)
+                        length_counts[len(parsed_seq)] += 1
+                        for residue, mods in parsed_seq:
+                            for mod in (mods or []):
+                                mod_counts[(residue, str(mod))] += 1
+                        for mod in (props.get("n_term") or []):
+                            mod_counts[("N-term", str(mod))] += 1
+                        for mod in (props.get("c_term") or []):
+                            mod_counts[("C-term", str(mod))] += 1
+                    except Exception:
+                        n_parse_errors += 1
 
             n_with_charge = sum(charge_counts.values())
             print(f"  {total_spectra:,} spectra loaded.", file=sys.stderr)
-            print(f"Computing charge distribution ...", file=sys.stderr)
+            if n_parse_errors:
+                print(
+                    f"  Warning: {n_parse_errors} spectra with unparseable"
+                    " SEQ= skipped.",
+                    file=sys.stderr,
+                )
+            print("Computing charge distribution ...", file=sys.stderr)
             print(f"  Spectra with charge: {n_with_charge:,}", file=sys.stderr)
-            print(f"Counting peaks per spectrum ...", file=sys.stderr)
-            print(f"Measuring peptide lengths ...", file=sys.stderr)
+            print("Counting peaks per spectrum ...", file=sys.stderr)
+            print("Measuring peptide lengths ...", file=sys.stderr)
             print(f"  Spectra with SEQ=: {n_with_seq:,}", file=sys.stderr)
 
             # ----------------------------------------------------------------
