@@ -762,6 +762,7 @@ def _build_summary_html(
     lengths_stats: dict | None,
     coverage_png: str | None,
     coverage_stats: dict | None,
+    mod_counts: Counter | None = None,
 ) -> str:
     """Build the HTML string for the MGF summary (links to external PNG/TSV)."""
     css = """
@@ -850,6 +851,15 @@ def _build_summary_html(
             f"<h2>Fragment Ion Coverage</h2>{coverage_html}{_img(coverage_png)}"
         )
 
+    if mod_counts:
+        mod_rows = sorted(mod_counts.items(), key=lambda x: -x[1])
+        mods_section = "<h2>Amino Acid Modifications</h2>" + _table(
+            ["Residue", "Modification", "Count"],
+            [(residue, mod, f"{count:,}") for (residue, mod), count in mod_rows],
+        )
+    else:
+        mods_section = ""
+
     charge_img = _img(charge_png) if charge_png else ""
     peaks_img = _img(peaks_png) if peaks_png else ""
 
@@ -864,6 +874,7 @@ def _build_summary_html(
 <h1>MGF Summary: {os.path.basename(mgf_file)}</h1>
 <h2>Overview</h2>
 {overview}
+{mods_section}
 <h2>Charge State Distribution</h2>
 {charge_table}
 {charge_img}
@@ -958,6 +969,8 @@ def summarize_mgf(
             peak_counts_counter: Counter[int] = Counter()
             length_counts: Counter[int] = Counter()
 
+            mod_counts: Counter[tuple[str, str]] = Counter()
+
             print("Reading spectra ...", file=sys.stderr)
             for spectrum_data in mgf.MGF(mgf_file):
                 total_spectra += 1
@@ -981,15 +994,22 @@ def summarize_mgf(
                 n_peaks = len(spectrum_data["m/z array"])
                 peak_counts_counter[n_peaks] += 1
 
-                # Sequence-based analyses (length only — no annotation)
+                # Sequence-based analyses (length + modifications — no annotation)
                 seq = params.get("seq", "")
                 if not seq:
                     continue
 
                 n_with_seq += 1
                 try:
-                    parsed_seq, _ = pyteomics_proforma.parse(seq)
+                    parsed_seq, props = pyteomics_proforma.parse(seq)
                     length_counts[len(parsed_seq)] += 1
+                    for residue, mods in parsed_seq:
+                        for mod in (mods or []):
+                            mod_counts[(residue, str(mod))] += 1
+                    for mod in (props.get("n_term") or []):
+                        mod_counts[("N-term", str(mod))] += 1
+                    for mod in (props.get("c_term") or []):
+                        mod_counts[("C-term", str(mod))] += 1
                 except Exception:
                     pass
 
@@ -1166,6 +1186,7 @@ def summarize_mgf(
                 lengths_stats=lengths_stats,
                 coverage_png=coverage_png,
                 coverage_stats=coverage_stats,
+                mod_counts=mod_counts,
             )
 
             out_path = os.path.join(output_root, stem + ".html")
