@@ -47,6 +47,7 @@ import csv
 import os
 import sys
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from os import PathLike
 from typing import Iterable
 
@@ -400,49 +401,33 @@ def peptide_lengths(
 
 
 # ---------------------------------------------------------------------------
-# Fragment coverage — core computation helper
+# Fragment coverage — multiprocessing worker
 # ---------------------------------------------------------------------------
 
+_CHUNK_SIZE = 500
 
-def _compute_coverage_results(
-    spectra,
-    tolerance: float = 10.0,
-    tolerance_unit: str = "ppm",
-) -> tuple[list, int]:
-    """Compute fragment ion coverage for all spectra.
 
-    Returns (results, n_skipped).
-    results is a list of (scan, filename, seq, charge, n_peaks, n_matched, prop).
+def _annotate_chunk(args):
+    """Annotate a chunk of spectra for fragment coverage.
+
+    Defined at module level so it is picklable for multiprocessing spawn.
+
+    Parameters
+    ----------
+    args : tuple
+        (chunk, tolerance, tolerance_unit) where *chunk* is a list of
+        (scan, filename, seq, charge, precursor_mz, obs_mz, obs_int).
+
+    Returns
+    -------
+    list of tagged tuples:
+        ("ok",         scan, filename, seq, charge, n_peaks, n_matched, prop)
+        ("lark_error", scan, seq, err_str)
+        ("error",      scan, seq, err_str)
     """
+    chunk, tolerance, tolerance_unit = args
     results = []
-    n_skipped = 0
-
-    count = 0
-    for spectrum_data in spectra:
-        count += 1
-        if count % 10000 == 0:
-            print(f"  {count} spectra processed ...", file=sys.stderr)
-
-        params = spectrum_data["params"]
-        scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
-        filename = str(params.get("filename", ""))
-        seq = params.get("seq", "")
-        charge_raw = params.get("charge", [2])
-        charge = (
-            int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
-        )
-        pepmass_raw = params.get("pepmass", (0.0,))
-        precursor_mz = float(
-            pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
-        )
-
-        if not seq:
-            n_skipped += 1
-            continue
-
-        obs_mz = spectrum_data["m/z array"]
-        obs_int = spectrum_data["intensity array"]
-
+    for scan, filename, seq, charge, precursor_mz, obs_mz, obs_int in chunk:
         try:
             spectrum = MsmsSpectrum(
                 identifier=scan,
@@ -460,17 +445,13 @@ def _compute_coverage_results(
                 neutral_losses=True,
             )
         except LarkError as e:
-            raise RuntimeError(
-                f"Failed to parse sequence {seq!r} as ProForma (scan {scan}).\n"
-                f"Modifications must use bracket notation, e.g. 'M[+15.995]' "
-                f"not 'M+15.995'.\nParser error: {e}"
-            ) from None
+            results.append(("lark_error", scan, seq, str(e)))
+            continue
         except Exception as e:
-            print(f"  Skipping scan {scan} ({seq!r}): {e}", file=sys.stderr)
-            n_skipped += 1
+            results.append(("error", scan, seq, str(e)))
             continue
 
-        n_peaks = len(obs_int)
+        n_peaks = len(obs_mz)
         n_matched = sum(
             1 for ann in spectrum.annotation
             if len(ann.fragment_annotations) > 0
@@ -482,8 +463,174 @@ def _compute_coverage_results(
         )
         total_intensity = spectrum.intensity.sum()
         prop = float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+        results.append(("ok", scan, filename, seq, charge, n_peaks, n_matched, prop))
+    return results
 
-        results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
+
+# ---------------------------------------------------------------------------
+# Fragment coverage — core computation helper
+# ---------------------------------------------------------------------------
+
+
+def _compute_coverage_results(
+    spectra,
+    tolerance: float = 10.0,
+    tolerance_unit: str = "ppm",
+    workers: int = 1,
+) -> tuple[list, int]:
+    """Compute fragment ion coverage for all spectra.
+
+    Returns (results, n_skipped).
+    results is a list of (scan, filename, seq, charge, n_peaks, n_matched, prop).
+
+    Parameters
+    ----------
+    spectra : iterable
+        Iterable of pyteomics spectrum dicts.
+    tolerance : float
+        Fragment mass tolerance.
+    tolerance_unit : str
+        'ppm' or 'Da'.
+    workers : int
+        Number of worker processes. 1 = sequential (default).
+    """
+    if workers == 1:
+        # Sequential path
+        results = []
+        n_skipped = 0
+        count = 0
+        for spectrum_data in spectra:
+            count += 1
+            if count % 10000 == 0:
+                print(f"  {count} spectra processed ...", file=sys.stderr)
+
+            params = spectrum_data["params"]
+            scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
+            filename = str(params.get("filename", ""))
+            seq = params.get("seq", "")
+            charge_raw = params.get("charge", [2])
+            charge = (
+                int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
+            )
+            pepmass_raw = params.get("pepmass", (0.0,))
+            precursor_mz = float(
+                pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
+            )
+
+            if not seq:
+                n_skipped += 1
+                continue
+
+            obs_mz = spectrum_data["m/z array"]
+            obs_int = spectrum_data["intensity array"]
+
+            try:
+                spectrum = MsmsSpectrum(
+                    identifier=scan,
+                    precursor_mz=precursor_mz,
+                    precursor_charge=charge,
+                    mz=obs_mz,
+                    intensity=obs_int.astype(np.float32),
+                )
+                spectrum.annotate_proforma(
+                    seq,
+                    fragment_tol_mass=tolerance,
+                    fragment_tol_mode=tolerance_unit,
+                    ion_types="by",
+                    max_isotope=1,
+                    neutral_losses=True,
+                )
+            except LarkError as e:
+                raise RuntimeError(
+                    f"Failed to parse sequence {seq!r} as ProForma (scan {scan}).\n"
+                    f"Modifications must use bracket notation, e.g. 'M[+15.995]' "
+                    f"not 'M+15.995'.\nParser error: {e}"
+                ) from None
+            except Exception as e:
+                print(f"  Skipping scan {scan} ({seq!r}): {e}", file=sys.stderr)
+                n_skipped += 1
+                continue
+
+            n_peaks = len(obs_int)
+            n_matched = sum(
+                1 for ann in spectrum.annotation
+                if len(ann.fragment_annotations) > 0
+            )
+            matched_intensity = sum(
+                spectrum.intensity[i]
+                for i, ann in enumerate(spectrum.annotation)
+                if len(ann.fragment_annotations) > 0
+            )
+            total_intensity = spectrum.intensity.sum()
+            prop = float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+            results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
+
+        return results, n_skipped
+
+    # Parallel path
+    results = []
+    n_skipped = 0
+    count = 0
+    chunk: list = []
+    futures = []
+
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        for spectrum_data in spectra:
+            count += 1
+            if count % 10000 == 0:
+                print(f"  {count} spectra read ...", file=sys.stderr)
+
+            params = spectrum_data["params"]
+            seq = params.get("seq", "")
+            if not seq:
+                n_skipped += 1
+                continue
+
+            scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
+            filename = str(params.get("filename", ""))
+            charge_raw = params.get("charge", [2])
+            charge = (
+                int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
+            )
+            pepmass_raw = params.get("pepmass", (0.0,))
+            precursor_mz = float(
+                pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
+            )
+            obs_mz = spectrum_data["m/z array"]
+            obs_int = spectrum_data["intensity array"]
+
+            chunk.append((scan, filename, seq, charge, precursor_mz, obs_mz, obs_int))
+            if len(chunk) >= _CHUNK_SIZE:
+                futures.append(
+                    executor.submit(_annotate_chunk, (chunk, tolerance, tolerance_unit))
+                )
+                chunk = []
+
+        if chunk:
+            futures.append(
+                executor.submit(_annotate_chunk, (chunk, tolerance, tolerance_unit))
+            )
+
+        n_scored = 0
+        for future in futures:
+            for item in future.result():
+                if item[0] == "ok":
+                    _, scan, filename, seq, charge, n_peaks, n_matched, prop = item
+                    results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
+                    n_scored += 1
+                    if n_scored % 10000 == 0:
+                        print(f"  {n_scored} spectra scored ...", file=sys.stderr)
+                elif item[0] == "lark_error":
+                    _, scan, seq, err_str = item
+                    raise RuntimeError(
+                        f"Failed to parse sequence {seq!r} as ProForma (scan {scan}).\n"
+                        f"Modifications must use bracket notation, e.g. 'M[+15.995]' "
+                        f"not 'M+15.995'.\nParser error: {err_str}"
+                    )
+                else:
+                    _, scan, seq, err_str = item
+                    print(f"  Skipping scan {scan} ({seq!r}): {err_str}", file=sys.stderr)
+                    n_skipped += 1
 
     return results, n_skipped
 
@@ -500,6 +647,7 @@ def fragment_coverage(
     output_tsv="fragment_coverage.tsv",
     output_full_tsv="fragment_coverage.full.tsv",
     output_plot="fragment_coverage.png",
+    workers=1,
 ):
     """Fragment ion intensity coverage for annotated MGF spectra.
 
@@ -517,6 +665,8 @@ def fragment_coverage(
         Output per-spectrum TSV path (default: fragment_coverage.full.tsv).
     output_plot : str
         Output histogram path (default: fragment_coverage.png).
+    workers : int
+        Number of parallel worker processes (default: 1).
     """
     if tolerance_unit not in ("ppm", "Da"):
         raise ValueError(
@@ -525,7 +675,7 @@ def fragment_coverage(
 
     with mgf.MGF(mgf_file) as reader:
         results, n_skipped = _compute_coverage_results(
-            reader, tolerance, tolerance_unit
+            reader, tolerance, tolerance_unit, workers=workers
         )
 
     count = len(results) + n_skipped
@@ -729,6 +879,7 @@ def summarize_mgf(
     output_root: PathLike = "mgf_summary",
     tolerance: float = 10.0,
     tolerance_unit: str = "ppm",
+    workers: int = 1,
 ) -> None:
     """Produce a self-contained HTML summary of an MGF file.
 
@@ -743,6 +894,8 @@ def summarize_mgf(
         Fragment mass tolerance for coverage calculation (default: 10).
     tolerance_unit : str
         Tolerance unit: 'ppm' or 'Da' (default: ppm).
+    workers : int
+        Number of parallel worker processes for coverage annotation (default: 1).
     """
     if tolerance_unit not in ("ppm", "Da"):
         raise ValueError(
@@ -758,168 +911,92 @@ def summarize_mgf(
     with open(log_path, "w", encoding="utf-8") as log_fh:
         sys.stderr = _Tee(_real_stderr, log_fh)
         try:
-            # -- Data accumulators (all O(unique-values), not O(spectra)) -----
+            # ----------------------------------------------------------------
+            # Pass 1: Fast streaming pass for charge/peak/length statistics.
+            # No annotation — just counting.
+            # ----------------------------------------------------------------
             total_spectra = 0
             n_with_seq = 0
             charge_counts: Counter[int] = Counter()
             peak_counts_counter: Counter[int] = Counter()
             length_counts: Counter[int] = Counter()
+
+            print("Reading spectra ...", file=sys.stderr)
+            for spectrum_data in mgf.MGF(mgf_file):
+                total_spectra += 1
+                if total_spectra % 10000 == 0:
+                    print(
+                        f"  {total_spectra:,} spectra loaded ...",
+                        file=sys.stderr,
+                    )
+
+                params = spectrum_data["params"]
+
+                # Charge distribution
+                charge_raw = params.get("charge", [])
+                if isinstance(charge_raw, list):
+                    if len(charge_raw) == 1:
+                        charge_counts[int(charge_raw[0])] += 1
+                else:
+                    charge_counts[int(charge_raw)] += 1
+
+                # Peak counts
+                n_peaks = len(spectrum_data["m/z array"])
+                peak_counts_counter[n_peaks] += 1
+
+                # Sequence-based analyses (length only — no annotation)
+                seq = params.get("seq", "")
+                if not seq:
+                    continue
+
+                n_with_seq += 1
+                try:
+                    parsed_seq, _ = pyteomics_proforma.parse(seq)
+                    length_counts[len(parsed_seq)] += 1
+                except Exception:
+                    pass
+
+            n_with_charge = sum(charge_counts.values())
+            print(f"  {total_spectra:,} spectra loaded.", file=sys.stderr)
+            print(f"Computing charge distribution ...", file=sys.stderr)
+            print(f"  Spectra with charge: {n_with_charge:,}", file=sys.stderr)
+            print(f"Counting peaks per spectrum ...", file=sys.stderr)
+            print(f"Measuring peptide lengths ...", file=sys.stderr)
+            print(f"  Spectra with SEQ=: {n_with_seq:,}", file=sys.stderr)
+
+            # ----------------------------------------------------------------
+            # Pass 2: Fragment coverage annotation (sequential or parallel).
+            # Reads the MGF file a second time.
+            # ----------------------------------------------------------------
+            print("Computing fragment ion coverage ...", file=sys.stderr)
+            with mgf.MGF(mgf_file) as reader:
+                cov_results, n_cov_skipped = _compute_coverage_results(
+                    reader, tolerance, tolerance_unit, workers=workers
+                )
+
+            cov_n = len(cov_results)
+            if n_cov_skipped:
+                print(
+                    f"  {n_cov_skipped} annotated spectra skipped (errors).",
+                    file=sys.stderr,
+                )
+            print(f"  {cov_n:,} spectra scored.", file=sys.stderr)
+
+            # Build pre-binned histogram from coverage results
             _N_COV_BINS = 50
             _cov_bin_edges = np.linspace(0.0, 1.0, _N_COV_BINS + 1)
             cov_bin_counts = np.zeros(_N_COV_BINS, dtype=np.int64)
             cov_min = 1.0
             cov_max = 0.0
             cov_sum = 0.0
-            cov_n = 0
-            n_cov_skipped = 0
-
-            cov_tsv_path = os.path.join(output_root, "fragment_coverage.tsv")
-
-            # -- Single streaming pass ----------------------------------------
-            print("Processing spectra ...", file=sys.stderr)
-            with open(cov_tsv_path, "w", newline="") as cov_fh:
-                cov_writer = csv.writer(cov_fh, delimiter="\t")
-                cov_writer.writerow(
-                    ["scan", "filename", "sequence", "charge",
-                     "n_peaks", "n_matched", "proportion_matched"]
-                )
-
-                for spectrum_data in mgf.MGF(mgf_file):
-                    total_spectra += 1
-                    if total_spectra % 100000 == 0:
-                        print(
-                            f"  {total_spectra:,} spectra processed ...",
-                            file=sys.stderr,
-                        )
-
-                    params = spectrum_data["params"]
-
-                    # Charge distribution
-                    charge_raw = params.get("charge", [])
-                    if isinstance(charge_raw, list):
-                        if len(charge_raw) == 1:
-                            charge_counts[int(charge_raw[0])] += 1
-                    else:
-                        charge_counts[int(charge_raw)] += 1
-
-                    # Peak counts
-                    n_peaks = len(spectrum_data["m/z array"])
-                    peak_counts_counter[n_peaks] += 1
-
-                    # Sequence-based analyses
-                    seq = params.get("seq", "")
-                    if not seq:
-                        continue
-
-                    n_with_seq += 1
-
-                    # Peptide length
-                    try:
-                        parsed_seq, _ = pyteomics_proforma.parse(seq)
-                        length_counts[len(parsed_seq)] += 1
-                    except Exception:
-                        pass
-
-                    # Fragment coverage
-                    scan = str(params.get("scans", params.get(
-                        "scan", f"idx_{total_spectra}"
-                    )))
-                    filename = str(params.get("filename", ""))
-                    charge_raw2 = params.get("charge", [2])
-                    charge = (
-                        int(charge_raw2[0])
-                        if isinstance(charge_raw2, list)
-                        else int(charge_raw2)
-                    )
-                    pepmass_raw = params.get("pepmass", (0.0,))
-                    precursor_mz = float(
-                        pepmass_raw[0]
-                        if isinstance(pepmass_raw, (list, tuple))
-                        else pepmass_raw
-                    )
-                    obs_mz = spectrum_data["m/z array"]
-                    obs_int = spectrum_data["intensity array"]
-
-                    try:
-                        spectrum = MsmsSpectrum(
-                            identifier=scan,
-                            precursor_mz=precursor_mz,
-                            precursor_charge=charge,
-                            mz=obs_mz,
-                            intensity=obs_int.astype(np.float32),
-                        )
-                        spectrum.annotate_proforma(
-                            seq,
-                            fragment_tol_mass=tolerance,
-                            fragment_tol_mode=tolerance_unit,
-                            ion_types="by",
-                            max_isotope=1,
-                            neutral_losses=True,
-                        )
-                    except LarkError as e:
-                        raise RuntimeError(
-                            f"Failed to parse sequence {seq!r} as ProForma"
-                            f" (scan {scan}).\n"
-                            f"Modifications must use bracket notation, e.g."
-                            f" 'M[+15.995]' not 'M+15.995'.\n"
-                            f"Parser error: {e}"
-                        ) from None
-                    except Exception as e:
-                        print(
-                            f"  Skipping scan {scan} ({seq!r}): {e}",
-                            file=sys.stderr,
-                        )
-                        n_cov_skipped += 1
-                        continue
-
-                    n_matched = sum(
-                        1 for ann in spectrum.annotation
-                        if len(ann.fragment_annotations) > 0
-                    )
-                    matched_intensity = sum(
-                        spectrum.intensity[i]
-                        for i, ann in enumerate(spectrum.annotation)
-                        if len(ann.fragment_annotations) > 0
-                    )
-                    total_int = spectrum.intensity.sum()
-                    prop = (
-                        float(matched_intensity / total_int)
-                        if total_int > 0 else 0.0
-                    )
-
-                    bin_idx = min(int(prop * _N_COV_BINS), _N_COV_BINS - 1)
-                    cov_bin_counts[bin_idx] += 1
-                    if cov_n == 0 or prop < cov_min:
-                        cov_min = prop
-                    if prop > cov_max:
-                        cov_max = prop
-                    cov_sum += prop
-                    cov_n += 1
-
-                    cov_writer.writerow(
-                        [scan, filename, seq, charge, n_peaks,
-                         n_matched, f"{prop:.6f}"]
-                    )
-
-            print(f"  {total_spectra:,} spectra processed.", file=sys.stderr)
-
-            # Remove coverage TSV if no annotated spectra were found
-            if cov_n == 0:
-                os.remove(cov_tsv_path)
-
-            n_with_charge = sum(charge_counts.values())
-            print(f"  Spectra with charge: {n_with_charge:,}", file=sys.stderr)
-            print(f"  Spectra with SEQ=: {n_with_seq:,}", file=sys.stderr)
-            if n_cov_skipped:
-                print(
-                    f"  {n_cov_skipped} annotated spectra skipped (errors).",
-                    file=sys.stderr,
-                )
-            if cov_n:
-                print(
-                    f"  {cov_n:,} spectra scored for fragment coverage.",
-                    file=sys.stderr,
-                )
+            for _, _, _, _, _, _, prop in cov_results:
+                bin_idx = min(int(prop * _N_COV_BINS), _N_COV_BINS - 1)
+                cov_bin_counts[bin_idx] += 1
+                if prop < cov_min:
+                    cov_min = prop
+                if prop > cov_max:
+                    cov_max = prop
+                cov_sum += prop
 
             # -- Compute summary stats ----------------------------------------
             peaks_stats = _counter_stats(peak_counts_counter)
@@ -934,7 +1011,7 @@ def summarize_mgf(
                     "mean": cov_sum / cov_n,
                 }
 
-            # -- Write TSV files (charge, peaks, lengths) ----------------------
+            # -- Write TSV files ----------------------------------------------
             print("Writing TSV files ...", file=sys.stderr)
 
             def _write_tsv(path, header, rows):
@@ -962,7 +1039,18 @@ def summarize_mgf(
                     [(ln, length_counts[ln]) for ln in sorted(length_counts)],
                 )
             if cov_n > 0:
-                print(f"  Wrote {cov_tsv_path}", file=sys.stderr)
+                cov_tsv_path = os.path.join(output_root, "fragment_coverage.tsv")
+                _write_tsv(
+                    cov_tsv_path,
+                    ["scan", "filename", "sequence", "charge",
+                     "n_peaks", "n_matched", "proportion_matched"],
+                    [
+                        (scan, filename, seq, charge, n_peaks, n_matched,
+                         f"{prop:.6f}")
+                        for scan, filename, seq, charge, n_peaks, n_matched, prop
+                        in cov_results
+                    ],
+                )
 
             # -- Save PNG files -----------------------------------------------
             print("Saving figures ...", file=sys.stderr)
