@@ -415,7 +415,8 @@ def _annotate_chunk(args):
     Parameters
     ----------
     args : tuple
-        (chunk, tolerance, tolerance_unit) where *chunk* is a list of
+        (chunk, tolerance, tolerance_unit, max_charge, neutral_losses)
+        where *chunk* is a list of
         (scan, filename, seq, charge, precursor_mz, obs_mz, obs_int).
 
     Returns
@@ -425,9 +426,10 @@ def _annotate_chunk(args):
         ("lark_error", scan, seq, err_str)
         ("error",      scan, seq, err_str)
     """
-    chunk, tolerance, tolerance_unit = args
+    chunk, tolerance, tolerance_unit, max_charge, neutral_losses = args
     results = []
     for scan, filename, seq, charge, precursor_mz, obs_mz, obs_int in chunk:
+        max_ion_charge = charge if max_charge == "max" else None
         try:
             spectrum = MsmsSpectrum(
                 identifier=scan,
@@ -442,7 +444,8 @@ def _annotate_chunk(args):
                 fragment_tol_mode=tolerance_unit,
                 ion_types="by",
                 max_isotope=1,
-                neutral_losses=True,
+                max_ion_charge=max_ion_charge,
+                neutral_losses=neutral_losses,
             )
         except LarkError as e:
             results.append(("lark_error", scan, seq, str(e)))
@@ -477,6 +480,8 @@ def _compute_coverage_results(
     tolerance: float = 10.0,
     tolerance_unit: str = "ppm",
     workers: int = 1,
+    max_charge: str = "1less",
+    neutral_losses: bool = True,
 ) -> tuple[list, int]:
     """Compute fragment ion coverage for all spectra.
 
@@ -493,6 +498,11 @@ def _compute_coverage_results(
         'ppm' or 'Da'.
     workers : int
         Number of worker processes. 1 = sequential (default).
+    max_charge : str
+        Maximum charge for fragment ions: 'max' (precursor charge) or
+        '1less' (precursor charge minus one, the spectrum_utils default).
+    neutral_losses : bool
+        Whether to include neutral losses in annotation.
     """
     if workers == 1:
         # Sequential path
@@ -523,6 +533,7 @@ def _compute_coverage_results(
 
             obs_mz = spectrum_data["m/z array"]
             obs_int = spectrum_data["intensity array"]
+            max_ion_charge = charge if max_charge == "max" else None
 
             try:
                 spectrum = MsmsSpectrum(
@@ -538,7 +549,8 @@ def _compute_coverage_results(
                     fragment_tol_mode=tolerance_unit,
                     ion_types="by",
                     max_isotope=1,
-                    neutral_losses=True,
+                    max_ion_charge=max_ion_charge,
+                    neutral_losses=neutral_losses,
                 )
             except LarkError as e:
                 raise RuntimeError(
@@ -602,13 +614,19 @@ def _compute_coverage_results(
             chunk.append((scan, filename, seq, charge, precursor_mz, obs_mz, obs_int))
             if len(chunk) >= _CHUNK_SIZE:
                 futures.append(
-                    executor.submit(_annotate_chunk, (chunk, tolerance, tolerance_unit))
+                    executor.submit(
+                        _annotate_chunk,
+                        (chunk, tolerance, tolerance_unit, max_charge, neutral_losses),
+                    )
                 )
                 chunk = []
 
         if chunk:
             futures.append(
-                executor.submit(_annotate_chunk, (chunk, tolerance, tolerance_unit))
+                executor.submit(
+                    _annotate_chunk,
+                    (chunk, tolerance, tolerance_unit, max_charge, neutral_losses),
+                )
             )
 
         n_scored = 0
@@ -648,6 +666,8 @@ def fragment_coverage(
     output_full_tsv="fragment_coverage.full.tsv",
     output_plot="fragment_coverage.png",
     workers=1,
+    max_charge="1less",
+    neutral_losses=True,
 ):
     """Fragment ion intensity coverage for annotated MGF spectra.
 
@@ -667,15 +687,23 @@ def fragment_coverage(
         Output histogram path (default: fragment_coverage.png).
     workers : int
         Number of parallel worker processes (default: 1).
+    max_charge : str
+        Maximum charge state for fragment ions: 'max' (precursor charge)
+        or '1less' (precursor charge minus one, default).
+    neutral_losses : bool
+        Include neutral losses in annotation (default: True).
     """
     if tolerance_unit not in ("ppm", "Da"):
         raise ValueError(
             f"tolerance_unit must be 'ppm' or 'Da', got '{tolerance_unit}'"
         )
+    if max_charge not in ("max", "1less"):
+        raise ValueError(f"max_charge must be 'max' or '1less', got '{max_charge}'")
 
     with mgf.MGF(mgf_file) as reader:
         results, n_skipped = _compute_coverage_results(
-            reader, tolerance, tolerance_unit, workers=workers
+            reader, tolerance, tolerance_unit, workers=workers,
+            max_charge=max_charge, neutral_losses=neutral_losses,
         )
 
     count = len(results) + n_skipped
@@ -880,6 +908,8 @@ def summarize_mgf(
     tolerance: float = 10.0,
     tolerance_unit: str = "ppm",
     workers: int = 1,
+    max_charge: str = "1less",
+    neutral_losses: bool = True,
 ) -> None:
     """Produce a self-contained HTML summary of an MGF file.
 
@@ -896,11 +926,18 @@ def summarize_mgf(
         Tolerance unit: 'ppm' or 'Da' (default: ppm).
     workers : int
         Number of parallel worker processes for coverage annotation (default: 1).
+    max_charge : str
+        Maximum charge state for fragment ions: 'max' (precursor charge)
+        or '1less' (precursor charge minus one, default).
+    neutral_losses : bool
+        Include neutral losses in annotation (default: True).
     """
     if tolerance_unit not in ("ppm", "Da"):
         raise ValueError(
             f"tolerance_unit must be 'ppm' or 'Da', got '{tolerance_unit}'"
         )
+    if max_charge not in ("max", "1less"):
+        raise ValueError(f"max_charge must be 'max' or '1less', got '{max_charge}'")
 
     os.makedirs(output_root, exist_ok=True)
 
@@ -971,7 +1008,8 @@ def summarize_mgf(
             print("Computing fragment ion coverage ...", file=sys.stderr)
             with mgf.MGF(mgf_file) as reader:
                 cov_results, n_cov_skipped = _compute_coverage_results(
-                    reader, tolerance, tolerance_unit, workers=workers
+                    reader, tolerance, tolerance_unit, workers=workers,
+                    max_charge=max_charge, neutral_losses=neutral_losses,
                 )
 
             cov_n = len(cov_results)
