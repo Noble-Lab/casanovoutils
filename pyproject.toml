@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { email = "gwenneth.straub@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "fire>=0.7.1",
     "matplotlib>=3.10.7",
@@ -14,6 +14,7 @@ dependencies = [
     "pandas>=2.3.3",
     "polars>=1.35.2",
     "pyteomics>=4.7.5",
+    "spectrum_utils>=0.5.0",
     "pyyaml>=6.0.3",
     "tqdm>=4.67.1",
 ]

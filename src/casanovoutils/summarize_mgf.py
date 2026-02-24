@@ -57,8 +57,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 # isort: on
 import numpy as np
-from pyteomics import mgf, proforma as pyteomics_proforma
-from spectrum_utils.spectrum import MsmsSpectrum
+try:
+    from lark.exceptions import LarkError
+    from pyteomics import mgf, proforma as pyteomics_proforma
+    from spectrum_utils.spectrum import MsmsSpectrum
+except Exception as e:
+    print(f"Error: failed to import required packages: {e}", file=sys.stderr)
+    print("Try: pip install --upgrade spectrum_utils numba pyteomics", file=sys.stderr)
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Shared plot helpers
@@ -380,8 +386,15 @@ def _compute_coverage_results(
                 fragment_tol_mass=tolerance,
                 fragment_tol_mode=tolerance_unit,
                 ion_types="by",
+                max_isotope=1,
                 neutral_losses=True,
             )
+        except LarkError as e:
+            raise RuntimeError(
+                f"Failed to parse sequence {seq!r} as ProForma (scan {scan}).\n"
+                f"Modifications must use bracket notation, e.g. 'M[+15.995]' "
+                f"not 'M+15.995'.\nParser error: {e}"
+            ) from None
         except Exception as e:
             print(f"  Skipping scan {scan} ({seq!r}): {e}", file=sys.stderr)
             n_skipped += 1
@@ -415,6 +428,7 @@ def fragment_coverage(
     tolerance=10.0,
     tolerance_unit="ppm",
     output_tsv="fragment_coverage.tsv",
+    output_full_tsv="fragment_coverage.full.tsv",
     output_plot="fragment_coverage.png",
 ):
     """Fragment ion intensity coverage for annotated MGF spectra.
@@ -429,6 +443,8 @@ def fragment_coverage(
         Tolerance unit: 'ppm' or 'Da' (default: ppm).
     output_tsv : str
         Output TSV path (default: fragment_coverage.tsv).
+    output_full_tsv : str
+        Output per-spectrum TSV path (default: fragment_coverage.full.tsv).
     output_plot : str
         Output histogram path (default: fragment_coverage.png).
     """
@@ -445,6 +461,14 @@ def fragment_coverage(
     count = len(results) + n_skipped
     print(f"Processed {count} spectra total.", file=sys.stderr)
     print(f"  {len(results)} scored, {n_skipped} skipped.", file=sys.stderr)
+
+    # -- Full per-spectrum TSV (in input order) --------------------------------
+    with open(output_full_tsv, "w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["scan", "peptide", "charge", "coverage"])
+        for scan, filename, seq, charge, n_peaks, n_matched, prop in results:
+            w.writerow([scan, seq, charge, f"{prop:.6f}"])
+    print(f"Wrote {output_full_tsv}", file=sys.stderr)
 
     # -- TSV output (sorted by proportion_matched) ----------------------------
     results.sort(key=lambda r: r[6])
