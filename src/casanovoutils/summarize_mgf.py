@@ -763,6 +763,10 @@ def _build_summary_html(
     coverage_png: str | None,
     coverage_stats: dict | None,
     mod_counts: Counter | None = None,
+    tolerance: float = 10.0,
+    tolerance_unit: str = "ppm",
+    max_charge: str = "1less",
+    neutral_losses: bool = True,
 ) -> str:
     """Build the HTML string for the MGF summary (links to external PNG/TSV)."""
     css = """
@@ -834,8 +838,20 @@ def _build_summary_html(
 
     coverage_section = ""
     if coverage_png is not None:
+        max_charge_label = (
+            "precursor charge" if max_charge == "max" else "precursor charge − 1"
+        )
+        coverage_params = _table(
+            ["Parameter", "Value"],
+            [
+                ("Ion types", "b, y"),
+                ("Tolerance", f"{tolerance} {tolerance_unit}"),
+                ("Max fragment charge", max_charge_label),
+                ("Neutral losses", "yes" if neutral_losses else "no"),
+            ],
+        )
         if coverage_stats:
-            coverage_html = _table(
+            coverage_stats_html = _table(
                 ["Metric", "Value"],
                 [
                     ("Spectra scored", f"{coverage_stats['n_scored']:,}"),
@@ -846,9 +862,12 @@ def _build_summary_html(
                 ],
             )
         else:
-            coverage_html = "<p class='note'>No annotated spectra.</p>"
+            coverage_stats_html = "<p class='note'>No annotated spectra.</p>"
         coverage_section = (
-            f"<h2>Fragment Ion Coverage</h2>{coverage_html}{_img(coverage_png)}"
+            f"<h2>Fragment Ion Coverage</h2>"
+            f"{coverage_params}"
+            f"{coverage_stats_html}"
+            f"{_img(coverage_png)}"
         )
 
     if mod_counts:
@@ -1187,6 +1206,10 @@ def summarize_mgf(
                 coverage_png=coverage_png,
                 coverage_stats=coverage_stats,
                 mod_counts=mod_counts,
+                tolerance=tolerance,
+                tolerance_unit=tolerance_unit,
+                max_charge=max_charge,
+                neutral_losses=neutral_losses,
             )
 
             out_path = os.path.join(output_root, stem + ".html")
