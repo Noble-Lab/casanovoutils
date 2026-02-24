@@ -103,6 +103,76 @@ def _make_histogram_fig(
     return fig
 
 
+def _make_histogram_fig_from_counter(
+    counter: Counter, xlabel: str, title: str, integer_bins: bool = False
+) -> plt.Figure:
+    """Create a histogram figure from a Counter without expanding to raw values."""
+    keys = np.array(sorted(counter.keys()), dtype=float)
+    weights = np.array([counter[k] for k in sorted(counter.keys())], dtype=float)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    if integer_bins and len(keys) <= 200:
+        ax.bar(keys, weights, edgecolor="black", linewidth=0.5)
+    else:
+        n_bins = min(50, len(keys))
+        bin_counts, bin_edges = np.histogram(keys, bins=n_bins, weights=weights)
+        centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        width = (bin_edges[1] - bin_edges[0]) * 0.9
+        ax.bar(centers, bin_counts, width=width, edgecolor="black", linewidth=0.5)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Number of spectra")
+    ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
+def _make_histogram_fig_from_bins(
+    bin_counts: np.ndarray, bin_edges: np.ndarray, xlabel: str, title: str
+) -> plt.Figure:
+    """Create a histogram figure from pre-binned data."""
+    centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    width = (bin_edges[1] - bin_edges[0]) * 0.9
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(centers, bin_counts, width=width, edgecolor="black", linewidth=0.5)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Number of spectra")
+    ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
+def _counter_stats(counter: Counter) -> dict | None:
+    """Compute min, max, median, mean from a Counter of numeric values."""
+    if not counter:
+        return None
+    total = sum(counter.values())
+    min_val = min(counter)
+    max_val = max(counter)
+    mean_val = sum(k * v for k, v in counter.items()) / total
+    mid = total / 2.0
+    cumsum = 0
+    median_val = min_val
+    for k in sorted(counter):
+        cumsum += counter[k]
+        if cumsum >= mid:
+            median_val = k
+            break
+    return {"min": min_val, "max": max_val, "median": median_val, "mean": mean_val}
+
+
+def _median_from_bins(bin_counts: np.ndarray, bin_edges: np.ndarray) -> float:
+    """Estimate median from pre-binned histogram data using bin-centre interpolation."""
+    total = bin_counts.sum()
+    if total == 0:
+        return 0.0
+    mid = total / 2.0
+    cumsum = 0
+    for i, count in enumerate(bin_counts):
+        cumsum += count
+        if cumsum >= mid:
+            return float((bin_edges[i] + bin_edges[i + 1]) / 2)
+    return float((bin_edges[-2] + bin_edges[-1]) / 2)
+
+
 # ---------------------------------------------------------------------------
 # Charge distribution
 # ---------------------------------------------------------------------------
@@ -509,11 +579,11 @@ def _build_summary_html(
     charge_png: str,
     charge_counts: dict,
     peaks_png: str,
-    peak_counts_list: list,
+    peaks_stats: dict | None,
     lengths_png: str | None,
-    lengths: list,
+    lengths_stats: dict | None,
     coverage_png: str | None,
-    coverage_results: list,
+    coverage_stats: dict | None,
 ) -> str:
     """Build the HTML string for the MGF summary (links to external PNG/TSV)."""
     css = """
@@ -552,57 +622,54 @@ def _build_summary_html(
         [(c, f"{charge_counts[c]:,}") for c in sorted(charge_counts)],
     )
 
-    if peak_counts_list:
-        arr = np.array(peak_counts_list)
-        peaks_stats = _table(
+    if peaks_stats:
+        peaks_html = _table(
             ["Metric", "Value"],
             [
-                ("Min peaks", f"{int(arr.min()):,}"),
-                ("Max peaks", f"{int(arr.max()):,}"),
-                ("Median peaks", f"{int(np.median(arr)):,}"),
-                ("Mean peaks", f"{arr.mean():.1f}"),
+                ("Min peaks", f"{int(peaks_stats['min']):,}"),
+                ("Max peaks", f"{int(peaks_stats['max']):,}"),
+                ("Median peaks", f"{int(peaks_stats['median']):,}"),
+                ("Mean peaks", f"{peaks_stats['mean']:.1f}"),
             ],
         )
     else:
-        peaks_stats = "<p class='note'>No data.</p>"
+        peaks_html = "<p class='note'>No data.</p>"
 
     lengths_section = ""
     if lengths_png is not None:
-        if lengths:
-            arr = np.array(lengths)
-            lengths_stats = _table(
+        if lengths_stats:
+            lengths_html = _table(
                 ["Metric", "Value"],
                 [
-                    ("Min length", f"{int(arr.min()):,}"),
-                    ("Max length", f"{int(arr.max()):,}"),
-                    ("Median length", f"{int(np.median(arr)):,}"),
-                    ("Mean length", f"{arr.mean():.1f}"),
+                    ("Min length", f"{int(lengths_stats['min']):,}"),
+                    ("Max length", f"{int(lengths_stats['max']):,}"),
+                    ("Median length", f"{int(lengths_stats['median']):,}"),
+                    ("Mean length", f"{lengths_stats['mean']:.1f}"),
                 ],
             )
         else:
-            lengths_stats = "<p class='note'>No annotated spectra.</p>"
+            lengths_html = "<p class='note'>No annotated spectra.</p>"
         lengths_section = (
-            f"<h2>Peptide Lengths</h2>{lengths_stats}{_img(lengths_png)}"
+            f"<h2>Peptide Lengths</h2>{lengths_html}{_img(lengths_png)}"
         )
 
     coverage_section = ""
     if coverage_png is not None:
-        if coverage_results:
-            proportions = np.array([r[6] for r in coverage_results])
-            coverage_stats = _table(
+        if coverage_stats:
+            coverage_html = _table(
                 ["Metric", "Value"],
                 [
-                    ("Spectra scored", f"{len(proportions):,}"),
-                    ("Min coverage", f"{proportions.min():.3f}"),
-                    ("Max coverage", f"{proportions.max():.3f}"),
-                    ("Median coverage", f"{np.median(proportions):.3f}"),
-                    ("Mean coverage", f"{proportions.mean():.3f}"),
+                    ("Spectra scored", f"{coverage_stats['n_scored']:,}"),
+                    ("Min coverage", f"{coverage_stats['min']:.3f}"),
+                    ("Max coverage", f"{coverage_stats['max']:.3f}"),
+                    ("Median coverage", f"{coverage_stats['median']:.3f}"),
+                    ("Mean coverage", f"{coverage_stats['mean']:.3f}"),
                 ],
             )
         else:
-            coverage_stats = "<p class='note'>No annotated spectra.</p>"
+            coverage_html = "<p class='note'>No annotated spectra.</p>"
         coverage_section = (
-            f"<h2>Fragment Ion Coverage</h2>{coverage_stats}{_img(coverage_png)}"
+            f"<h2>Fragment Ion Coverage</h2>{coverage_html}{_img(coverage_png)}"
         )
 
     charge_img = _img(charge_png) if charge_png else ""
@@ -623,7 +690,7 @@ def _build_summary_html(
 {charge_table}
 {charge_img}
 <h2>Peaks per Spectrum</h2>
-{peaks_stats}
+{peaks_html}
 {peaks_img}
 {lengths_section}
 {coverage_section}
@@ -691,46 +758,183 @@ def summarize_mgf(
     with open(log_path, "w", encoding="utf-8") as log_fh:
         sys.stderr = _Tee(_real_stderr, log_fh)
         try:
-            print("Reading spectra ...", file=sys.stderr)
-            spectra = list(mgf.MGF(mgf_file))
-            total_spectra = len(spectra)
-            print(f"  {total_spectra:,} spectra loaded.", file=sys.stderr)
+            # -- Data accumulators (all O(unique-values), not O(spectra)) -----
+            total_spectra = 0
+            n_with_seq = 0
+            charge_counts: Counter[int] = Counter()
+            peak_counts_counter: Counter[int] = Counter()
+            length_counts: Counter[int] = Counter()
+            _N_COV_BINS = 50
+            _cov_bin_edges = np.linspace(0.0, 1.0, _N_COV_BINS + 1)
+            cov_bin_counts = np.zeros(_N_COV_BINS, dtype=np.int64)
+            cov_min = 1.0
+            cov_max = 0.0
+            cov_sum = 0.0
+            cov_n = 0
+            n_cov_skipped = 0
 
-            # -- Charge distribution ------------------------------------------
-            print("Computing charge distribution ...", file=sys.stderr)
-            charge_counts, _ = count_charge_states(spectra)
+            cov_tsv_path = os.path.join(output_root, "fragment_coverage.tsv")
+
+            # -- Single streaming pass ----------------------------------------
+            print("Processing spectra ...", file=sys.stderr)
+            with open(cov_tsv_path, "w", newline="") as cov_fh:
+                cov_writer = csv.writer(cov_fh, delimiter="\t")
+                cov_writer.writerow(
+                    ["scan", "filename", "sequence", "charge",
+                     "n_peaks", "n_matched", "proportion_matched"]
+                )
+
+                for spectrum_data in mgf.MGF(mgf_file):
+                    total_spectra += 1
+                    if total_spectra % 100000 == 0:
+                        print(
+                            f"  {total_spectra:,} spectra processed ...",
+                            file=sys.stderr,
+                        )
+
+                    params = spectrum_data["params"]
+
+                    # Charge distribution
+                    charge_raw = params.get("charge", [])
+                    if isinstance(charge_raw, list):
+                        if len(charge_raw) == 1:
+                            charge_counts[int(charge_raw[0])] += 1
+                    else:
+                        charge_counts[int(charge_raw)] += 1
+
+                    # Peak counts
+                    n_peaks = len(spectrum_data["m/z array"])
+                    peak_counts_counter[n_peaks] += 1
+
+                    # Sequence-based analyses
+                    seq = params.get("seq", "")
+                    if not seq:
+                        continue
+
+                    n_with_seq += 1
+
+                    # Peptide length
+                    try:
+                        parsed_seq, _ = pyteomics_proforma.parse(seq)
+                        length_counts[len(parsed_seq)] += 1
+                    except Exception:
+                        pass
+
+                    # Fragment coverage
+                    scan = str(params.get("scans", params.get(
+                        "scan", f"idx_{total_spectra}"
+                    )))
+                    filename = str(params.get("filename", ""))
+                    charge_raw2 = params.get("charge", [2])
+                    charge = (
+                        int(charge_raw2[0])
+                        if isinstance(charge_raw2, list)
+                        else int(charge_raw2)
+                    )
+                    pepmass_raw = params.get("pepmass", (0.0,))
+                    precursor_mz = float(
+                        pepmass_raw[0]
+                        if isinstance(pepmass_raw, (list, tuple))
+                        else pepmass_raw
+                    )
+                    obs_mz = spectrum_data["m/z array"]
+                    obs_int = spectrum_data["intensity array"]
+
+                    try:
+                        spectrum = MsmsSpectrum(
+                            identifier=scan,
+                            precursor_mz=precursor_mz,
+                            precursor_charge=charge,
+                            mz=obs_mz,
+                            intensity=obs_int.astype(np.float32),
+                        )
+                        spectrum.annotate_proforma(
+                            seq,
+                            fragment_tol_mass=tolerance,
+                            fragment_tol_mode=tolerance_unit,
+                            ion_types="by",
+                            max_isotope=1,
+                            neutral_losses=True,
+                        )
+                    except LarkError as e:
+                        raise RuntimeError(
+                            f"Failed to parse sequence {seq!r} as ProForma"
+                            f" (scan {scan}).\n"
+                            f"Modifications must use bracket notation, e.g."
+                            f" 'M[+15.995]' not 'M+15.995'.\n"
+                            f"Parser error: {e}"
+                        ) from None
+                    except Exception as e:
+                        print(
+                            f"  Skipping scan {scan} ({seq!r}): {e}",
+                            file=sys.stderr,
+                        )
+                        n_cov_skipped += 1
+                        continue
+
+                    n_matched = sum(
+                        1 for ann in spectrum.annotation
+                        if len(ann.fragment_annotations) > 0
+                    )
+                    matched_intensity = sum(
+                        spectrum.intensity[i]
+                        for i, ann in enumerate(spectrum.annotation)
+                        if len(ann.fragment_annotations) > 0
+                    )
+                    total_int = spectrum.intensity.sum()
+                    prop = (
+                        float(matched_intensity / total_int)
+                        if total_int > 0 else 0.0
+                    )
+
+                    bin_idx = min(int(prop * _N_COV_BINS), _N_COV_BINS - 1)
+                    cov_bin_counts[bin_idx] += 1
+                    if cov_n == 0 or prop < cov_min:
+                        cov_min = prop
+                    if prop > cov_max:
+                        cov_max = prop
+                    cov_sum += prop
+                    cov_n += 1
+
+                    cov_writer.writerow(
+                        [scan, filename, seq, charge, n_peaks,
+                         n_matched, f"{prop:.6f}"]
+                    )
+
+            print(f"  {total_spectra:,} spectra processed.", file=sys.stderr)
+
+            # Remove coverage TSV if no annotated spectra were found
+            if cov_n == 0:
+                os.remove(cov_tsv_path)
+
             n_with_charge = sum(charge_counts.values())
             print(f"  Spectra with charge: {n_with_charge:,}", file=sys.stderr)
-
-            # -- Peak counts --------------------------------------------------
-            print("Counting peaks per spectrum ...", file=sys.stderr)
-            peak_counts_list = count_peaks(spectra)
-
-            # -- Peptide lengths ----------------------------------------------
-            print("Measuring peptide lengths ...", file=sys.stderr)
-            lengths, n_len_skipped = measure_peptide_lengths(spectra)
-            n_with_seq = sum(1 for s in spectra if s["params"].get("seq", ""))
             print(f"  Spectra with SEQ=: {n_with_seq:,}", file=sys.stderr)
-            if n_len_skipped:
+            if n_cov_skipped:
                 print(
-                    f"  {n_len_skipped} spectra skipped (no SEQ= or unknown"
-                    " modification).",
+                    f"  {n_cov_skipped} annotated spectra skipped (errors).",
+                    file=sys.stderr,
+                )
+            if cov_n:
+                print(
+                    f"  {cov_n:,} spectra scored for fragment coverage.",
                     file=sys.stderr,
                 )
 
-            # -- Fragment coverage (only if sequences present) ----------------
-            coverage_results_list: list = []
-            if n_with_seq > 0:
-                print("Computing fragment ion coverage ...", file=sys.stderr)
-                coverage_results_list, _ = _compute_coverage_results(
-                    spectra, tolerance, tolerance_unit
-                )
-                print(
-                    f"  {len(coverage_results_list):,} spectra scored.",
-                    file=sys.stderr,
-                )
+            # -- Compute summary stats ----------------------------------------
+            peaks_stats = _counter_stats(peak_counts_counter)
+            lengths_stats = _counter_stats(length_counts) if length_counts else None
+            coverage_stats = None
+            if cov_n > 0:
+                coverage_stats = {
+                    "n_scored": cov_n,
+                    "min": cov_min,
+                    "max": cov_max,
+                    "median": _median_from_bins(cov_bin_counts, _cov_bin_edges),
+                    "mean": cov_sum / cov_n,
+                }
 
-            # -- Write TSV files ----------------------------------------------
+            # -- Write TSV files (charge, peaks, lengths) ----------------------
             print("Writing TSV files ...", file=sys.stderr)
 
             def _write_tsv(path, header, rows):
@@ -741,44 +945,24 @@ def summarize_mgf(
                         w.writerow(row)
                 print(f"  Wrote {path}", file=sys.stderr)
 
-            charge_tsv = os.path.join(output_root, "charge_distribution.tsv")
             _write_tsv(
-                charge_tsv,
+                os.path.join(output_root, "charge_distribution.tsv"),
                 ["charge", "count"],
                 [(c, charge_counts[c]) for c in sorted(charge_counts)],
             )
-
-            peaks_counts_map = Counter(peak_counts_list)
-            peaks_tsv = os.path.join(output_root, "peak_counts.tsv")
             _write_tsv(
-                peaks_tsv,
+                os.path.join(output_root, "peak_counts.tsv"),
                 ["n_peaks", "count"],
-                [(n, peaks_counts_map[n]) for n in sorted(peaks_counts_map)],
+                [(n, peak_counts_counter[n]) for n in sorted(peak_counts_counter)],
             )
-
-            lengths_png: str | None = None
-            if lengths:
-                lengths_counts_map = Counter(lengths)
-                lengths_tsv = os.path.join(output_root, "peptide_lengths.tsv")
+            if length_counts:
                 _write_tsv(
-                    lengths_tsv,
+                    os.path.join(output_root, "peptide_lengths.tsv"),
                     ["length", "count"],
-                    [(ln, lengths_counts_map[ln]) for ln in sorted(lengths_counts_map)],
+                    [(ln, length_counts[ln]) for ln in sorted(length_counts)],
                 )
-
-            coverage_png: str | None = None
-            if coverage_results_list:
-                coverage_results_list.sort(key=lambda r: r[6])
-                coverage_tsv = os.path.join(output_root, "fragment_coverage.tsv")
-                _write_tsv(
-                    coverage_tsv,
-                    ["scan", "filename", "sequence", "charge", "n_peaks",
-                     "n_matched", "proportion_matched"],
-                    [
-                        (sc, fn, sq, ch, np_, nm, f"{pr:.6f}")
-                        for sc, fn, sq, ch, np_, nm, pr in coverage_results_list
-                    ],
-                )
+            if cov_n > 0:
+                print(f"  Wrote {cov_tsv_path}", file=sys.stderr)
 
             # -- Save PNG files -----------------------------------------------
             print("Saving figures ...", file=sys.stderr)
@@ -797,44 +981,45 @@ def summarize_mgf(
                 )
 
             peaks_png = ""
-            if peak_counts_list:
-                arr = np.array(peak_counts_list)
+            if peak_counts_counter and peaks_stats:
                 peaks_png = _save_fig(
-                    _make_histogram_fig(
-                        peak_counts_list,
+                    _make_histogram_fig_from_counter(
+                        peak_counts_counter,
                         xlabel="Number of peaks",
                         title=(
                             f"Peaks per spectrum (n={total_spectra:,},"
-                            f" median={int(np.median(arr))})"
+                            f" median={int(peaks_stats['median'])})"
                         ),
                     ),
                     "peak_counts.png",
                 )
 
-            if lengths:
-                arr = np.array(lengths)
+            lengths_png: str | None = None
+            if length_counts and lengths_stats:
+                n_lengths = sum(length_counts.values())
                 lengths_png = _save_fig(
-                    _make_histogram_fig(
-                        lengths,
+                    _make_histogram_fig_from_counter(
+                        length_counts,
                         xlabel="Peptide length (residues)",
                         title=(
-                            f"Peptide length distribution (n={len(lengths):,},"
-                            f" median={int(np.median(arr))})"
+                            f"Peptide length distribution (n={n_lengths:,},"
+                            f" median={int(lengths_stats['median'])})"
                         ),
                         integer_bins=True,
                     ),
                     "peptide_lengths.png",
                 )
 
-            if coverage_results_list:
-                proportions = np.array([r[6] for r in coverage_results_list])
+            coverage_png: str | None = None
+            if cov_n > 0 and coverage_stats:
                 coverage_png = _save_fig(
-                    _make_histogram_fig(
-                        proportions,
+                    _make_histogram_fig_from_bins(
+                        cov_bin_counts,
+                        _cov_bin_edges,
                         xlabel="Proportion of intensity matched by b/y ions",
                         title=(
-                            f"Fragment ion coverage (n={len(proportions):,},"
-                            f" median={np.median(proportions):.3f})"
+                            f"Fragment ion coverage (n={cov_n:,},"
+                            f" median={coverage_stats['median']:.3f})"
                         ),
                     ),
                     "fragment_coverage.png",
@@ -850,11 +1035,11 @@ def summarize_mgf(
                 charge_png=charge_png,
                 charge_counts=charge_counts,
                 peaks_png=peaks_png,
-                peak_counts_list=peak_counts_list,
+                peaks_stats=peaks_stats,
                 lengths_png=lengths_png,
-                lengths=lengths,
+                lengths_stats=lengths_stats,
                 coverage_png=coverage_png,
-                coverage_results=coverage_results_list,
+                coverage_stats=coverage_stats,
             )
 
             out_path = os.path.join(output_root, stem + ".html")
