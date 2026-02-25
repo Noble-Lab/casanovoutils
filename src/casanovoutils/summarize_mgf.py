@@ -368,8 +368,8 @@ def peptide_lengths(
     print(f"Processed {total} spectra total.", file=sys.stderr)
     if n_skipped:
         print(
-            f"  Warning: {n_skipped} spectra without SEQ= or with unknown"
-            " modifications were skipped.",
+            f"  Warning: {n_skipped} spectra without SEQ= or with invalid"
+            " ProForma sequences were skipped.",
             file=sys.stderr,
         )
 
@@ -739,18 +739,19 @@ def fragment_coverage(
     print(f"Wrote {output_tsv}", file=sys.stderr)
 
     # -- Histogram -----------------------------------------------------------
-    proportions = np.array([r[6] for r in results])
-    fig = _make_histogram_fig(
-        proportions,
-        xlabel="Proportion of intensity matched by b/y ions",
-        title=(
-            f"Fragment ion coverage  (n={len(proportions):,}, "
-            f"median={np.median(proportions):.3f})"
-        ),
-    )
-    fig.savefig(output_plot, dpi=150)
-    plt.close(fig)
-    print(f"Wrote {output_plot}", file=sys.stderr)
+    if results:
+        proportions = np.array([r[6] for r in results])
+        fig = _make_histogram_fig(
+            proportions,
+            xlabel="Proportion of intensity matched by b/y ions",
+            title=(
+                f"Fragment ion coverage  (n={len(proportions):,}, "
+                f"median={np.median(proportions):.3f})"
+            ),
+        )
+        fig.savefig(output_plot, dpi=150)
+        plt.close(fig)
+        print(f"Wrote {output_plot}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -790,9 +791,9 @@ def _build_summary_html(
     """
 
     def _table(header_row, data_rows):
-        ths = "".join(f"<th>{h}</th>" for h in header_row)
+        ths = "".join(f"<th>{html_mod.escape(str(h))}</th>" for h in header_row)
         trs = "".join(
-            "<tr>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
+            "<tr>" + "".join(f"<td>{html_mod.escape(str(v))}</td>" for v in row) + "</tr>"
             for row in data_rows
         )
         return f"<table><tr>{ths}</tr>{trs}</table>"
