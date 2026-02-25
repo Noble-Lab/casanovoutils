@@ -176,6 +176,28 @@ def _median_from_bins(bin_counts: np.ndarray, bin_edges: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Charge parsing helper
+# ---------------------------------------------------------------------------
+
+
+def _parse_single_charge(charge_raw) -> int | None:
+    """Return the charge as an int, or None if ambiguous or malformed.
+
+    Accepts a scalar value or a single-element list as returned by pyteomics.
+    Returns None for empty lists, multi-element lists, and values that cannot
+    be converted to int.
+    """
+    try:
+        if isinstance(charge_raw, list):
+            if len(charge_raw) != 1:
+                return None
+            return int(charge_raw[0])
+        return int(charge_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Charge distribution
 # ---------------------------------------------------------------------------
 
@@ -198,14 +220,10 @@ def count_charge_states(spectra: Iterable) -> tuple[dict[int, int], int]:
     counts: Counter[int] = Counter()
     n_skipped = 0
     for spectrum in spectra:
-        charge_raw = spectrum["params"].get("charge", [])
-        if isinstance(charge_raw, list):
-            if len(charge_raw) != 1:
-                n_skipped += 1
-                continue
-            charge = int(charge_raw[0])
-        else:
-            charge = int(charge_raw)
+        charge = _parse_single_charge(spectrum["params"].get("charge", []))
+        if charge is None:
+            n_skipped += 1
+            continue
         counts[charge] += 1
     return counts, n_skipped
 
@@ -505,6 +523,9 @@ def _compute_coverage_results(
     neutral_losses : bool
         Whether to include neutral losses in annotation.
     """
+    if not isinstance(workers, int) or workers < 1:
+        raise ValueError(f"workers must be a positive integer, got {workers!r}")
+
     if workers == 1:
         # Sequential path
         results = []
@@ -519,14 +540,10 @@ def _compute_coverage_results(
             scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
             filename = str(params.get("filename", ""))
             seq = params.get("seq", "")
-            charge_raw = params.get("charge", [])
-            if isinstance(charge_raw, list):
-                if len(charge_raw) != 1:
-                    n_skipped += 1
-                    continue
-                charge = int(charge_raw[0])
-            else:
-                charge = int(charge_raw)
+            charge = _parse_single_charge(params.get("charge", []))
+            if charge is None:
+                n_skipped += 1
+                continue
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
                 pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
@@ -605,14 +622,10 @@ def _compute_coverage_results(
 
             scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
             filename = str(params.get("filename", ""))
-            charge_raw = params.get("charge", [])
-            if isinstance(charge_raw, list):
-                if len(charge_raw) != 1:
-                    n_skipped += 1
-                    continue
-                charge = int(charge_raw[0])
-            else:
-                charge = int(charge_raw)
+            charge = _parse_single_charge(params.get("charge", []))
+            if charge is None:
+                n_skipped += 1
+                continue
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
                 pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
@@ -1021,12 +1034,9 @@ def summarize_mgf(
                     params = spectrum_data["params"]
 
                     # Charge distribution
-                    charge_raw = params.get("charge", [])
-                    if isinstance(charge_raw, list):
-                        if len(charge_raw) == 1:
-                            charge_counts[int(charge_raw[0])] += 1
-                    else:
-                        charge_counts[int(charge_raw)] += 1
+                    charge = _parse_single_charge(params.get("charge", []))
+                    if charge is not None:
+                        charge_counts[charge] += 1
 
                     # Peak counts
                     n_peaks = len(spectrum_data["m/z array"])
