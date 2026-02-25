@@ -456,6 +456,56 @@ def test_fragment_coverage_integration(tmp_path):
     assert png_path.stat().st_size > 0
 
 
+def test_fragment_coverage_skips_missing_charge(tmp_path):
+    """fragment_coverage skips spectra with missing or ambiguous charge."""
+    mgf_text = """\
+BEGIN IONS
+TITLE=spec1
+PEPMASS=500.26 100.0
+CHARGE=2+
+SEQ=AGK
+100.0 10
+200.0 20
+END IONS
+
+BEGIN IONS
+TITLE=spec_no_charge
+PEPMASS=600.0 80.0
+SEQ=AGK
+100.0 10
+200.0 20
+END IONS
+
+BEGIN IONS
+TITLE=spec_multi_charge
+PEPMASS=700.0 60.0
+CHARGE=2+, 3+
+SEQ=AGK
+100.0 10
+200.0 20
+END IONS
+"""
+    mgf_path = tmp_path / "test.mgf"
+    mgf_path.write_text(mgf_text)
+
+    tsv_path = tmp_path / "coverage.tsv"
+    full_tsv_path = tmp_path / "coverage.full.tsv"
+    png_path = tmp_path / "coverage.png"
+
+    fragment_coverage(
+        str(mgf_path),
+        output_tsv=str(tsv_path),
+        output_full_tsv=str(full_tsv_path),
+        output_plot=str(png_path),
+    )
+
+    with open(full_tsv_path) as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+
+    # Only spec1 has a valid, unambiguous charge; the other two are skipped
+    assert len(rows) == 1
+
+
 def test_fragment_coverage_workers_match(tmp_path):
     """fragment_coverage with workers=2 produces the same results as workers=1."""
     mgf_path = tmp_path / "test.mgf"

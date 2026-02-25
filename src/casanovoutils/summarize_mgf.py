@@ -519,10 +519,14 @@ def _compute_coverage_results(
             scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
             filename = str(params.get("filename", ""))
             seq = params.get("seq", "")
-            charge_raw = params.get("charge", [2])
-            charge = (
-                int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
-            )
+            charge_raw = params.get("charge", [])
+            if isinstance(charge_raw, list):
+                if len(charge_raw) != 1:
+                    n_skipped += 1
+                    continue
+                charge = int(charge_raw[0])
+            else:
+                charge = int(charge_raw)
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
                 pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
@@ -601,10 +605,14 @@ def _compute_coverage_results(
 
             scan = str(params.get("scans", params.get("scan", f"idx_{count}")))
             filename = str(params.get("filename", ""))
-            charge_raw = params.get("charge", [2])
-            charge = (
-                int(charge_raw[0]) if isinstance(charge_raw, list) else int(charge_raw)
-            )
+            charge_raw = params.get("charge", [])
+            if isinstance(charge_raw, list):
+                if len(charge_raw) != 1:
+                    n_skipped += 1
+                    continue
+                charge = int(charge_raw[0])
+            else:
+                charge = int(charge_raw)
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
                 pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
