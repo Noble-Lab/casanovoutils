@@ -29,6 +29,7 @@ fragment-coverage = "casanovoutils.summarize_mgf:fragment_coverage_main"
 peak-counts = "casanovoutils.summarize_mgf:peak_counts_main"
 peptide-lengths = "casanovoutils.summarize_mgf:peptide_lengths_main"
 summarize-mgf = "casanovoutils.summarize_mgf:summarize_mgf_main"
+downsample-spectra = "casanovoutils.downsample_spectra:main"
 
 [build-system]
 requires = ["hatchling"]
