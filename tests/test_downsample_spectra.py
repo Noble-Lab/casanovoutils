@@ -1,5 +1,6 @@
 """Tests for the downsample-spectra command."""
 
+import numpy as np
 import pytest
 import pyteomics.mgf
 
@@ -13,8 +14,6 @@ from casanovoutils.downsample_spectra import downsample_spectra
 
 def _write_mgf(path, n_spectra):
     """Write *n_spectra* minimal spectra to *path* and return the path."""
-    import numpy as np
-
     spectra = [
         {
             "params": {

@@ -99,6 +99,8 @@ def downsample_spectra(
     total = len(spectra)
     if downsample_type == "proportion":
         k = round(total * downsample_rate)
+    # Clamp k to the number of available spectra (relevant when downsample_rate
+    # for "number" mode exceeds the total, or rounding pushes "proportion" > 1).
     k = min(k, total)
 
     sampled = random.sample(spectra, k)
