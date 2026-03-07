@@ -361,6 +361,26 @@ def test_number_rate_non_integer_raises(tmp_path):
         downsample_spectra(inp, out, downsample_type="number", downsample_rate=2.5)
 
 
+def test_number_rate_nan_raises(tmp_path):
+    """NaN raises ValueError for number mode rather than a bare conversion error."""
+    import math
+
+    inp = _write_mgf(tmp_path / "in.mgf", 5)
+    out = tmp_path / "out.mgf"
+    with pytest.raises(ValueError, match="positive integer"):
+        downsample_spectra(inp, out, downsample_type="number", downsample_rate=math.nan)
+
+
+def test_number_rate_inf_raises(tmp_path):
+    """Infinity raises ValueError for number mode rather than OverflowError."""
+    import math
+
+    inp = _write_mgf(tmp_path / "in.mgf", 5)
+    out = tmp_path / "out.mgf"
+    with pytest.raises(ValueError, match="positive integer"):
+        downsample_spectra(inp, out, downsample_type="number", downsample_rate=math.inf)
+
+
 def test_proportion_rate_zero_raises(tmp_path):
     """downsample_rate=0 raises ValueError for proportion mode."""
     inp = _write_mgf(tmp_path / "in.mgf", 5)

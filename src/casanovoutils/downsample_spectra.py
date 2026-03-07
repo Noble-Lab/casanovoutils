@@ -10,6 +10,7 @@ Three strategies are provided:
   the file twice, at the cost of only approximate output size.
 """
 
+import math
 import random
 import sys
 from os import PathLike
@@ -78,7 +79,11 @@ def downsample_spectra(
         )
 
     if downsample_type == "number":
-        if downsample_rate != int(downsample_rate) or int(downsample_rate) < 1:
+        if (
+            not math.isfinite(downsample_rate)
+            or downsample_rate != int(downsample_rate)
+            or int(downsample_rate) < 1
+        ):
             raise ValueError(
                 "--downsample-rate must be a positive integer when "
                 f"--downsample-type is 'number', got {downsample_rate!r}."
