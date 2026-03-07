@@ -13,6 +13,7 @@ Three strategies are provided:
 import random
 import sys
 from os import PathLike
+from pathlib import Path
 
 import fire
 import pyteomics.mgf
@@ -35,7 +36,8 @@ def downsample_spectra(
     input_file : PathLike
         Path to the input MGF file.
     output_file : PathLike
-        Path for the downsampled output MGF file.
+        Path for the downsampled output MGF file.  Must differ from
+        *input_file*; overwriting the input in-place is not supported.
     downsample_type : str, default ``"number"``
         Sampling strategy.  One of:
 
@@ -59,9 +61,16 @@ def downsample_spectra(
     Raises
     ------
     ValueError
-        If *downsample_type* is not recognised, or *downsample_rate* is
+        If *input_file* and *output_file* resolve to the same path, if
+        *downsample_type* is not recognised, or if *downsample_rate* is
         out of range for the chosen type.
     """
+    if Path(input_file).resolve() == Path(output_file).resolve():
+        raise ValueError(
+            "input_file and output_file must be different paths; "
+            "overwriting the input in-place is not supported."
+        )
+
     if downsample_type not in _VALID_TYPES:
         raise ValueError(
             f"--downsample-type must be one of {sorted(_VALID_TYPES)}, "
@@ -83,10 +92,10 @@ def downsample_spectra(
                 f"got {downsample_rate!r}."
             )
 
-    random.seed(random_seed)
+    rng = random.Random(random_seed)
 
     if downsample_type == "approx-proportion":
-        _stream_sample(input_file, output_file, downsample_rate)
+        _stream_sample(input_file, output_file, downsample_rate, rng)
         return
 
     # ---- exact sampling: load everything into memory -------------------------
@@ -103,7 +112,9 @@ def downsample_spectra(
     # for "number" mode exceeds the total, or rounding pushes "proportion" > 1).
     k = min(k, total)
 
-    sampled = random.sample(spectra, k)
+    # Sample by index and sort so output preserves the original input order.
+    indices = sorted(rng.sample(range(total), k))
+    sampled = [spectra[i] for i in indices]
 
     pct = k / total if total > 0 else 0.0
     print(
@@ -122,6 +133,7 @@ def _stream_sample(
     input_file: PathLike,
     output_file: PathLike,
     rate: float,
+    rng: random.Random,
 ) -> None:
     """Stream-sample spectra, accepting each with probability *rate*.
 
@@ -133,6 +145,9 @@ def _stream_sample(
         Path for the output MGF file.
     rate : float
         Acceptance probability in ``(0, 1]``.
+    rng : random.Random
+        Local random number generator instance (caller-supplied for
+        reproducibility without mutating global state).
     """
     counter = {"read": 0, "written": 0}
 
@@ -142,7 +157,7 @@ def _stream_sample(
                 reader, desc="Streaming spectra", unit="spectrum"
             ):
                 counter["read"] += 1
-                if random.random() < rate:
+                if rng.random() < rate:
                     counter["written"] += 1
                     yield spectrum
 

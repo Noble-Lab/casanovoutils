@@ -274,6 +274,57 @@ def test_approx_proportion_different_seeds_differ(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Input/output path safety
+# ---------------------------------------------------------------------------
+
+
+def test_same_input_output_raises(tmp_path):
+    """Passing the same path for input and output raises ValueError."""
+    inp = _write_mgf(tmp_path / "in.mgf", 5)
+    with pytest.raises(ValueError, match="different paths"):
+        downsample_spectra(inp, inp, downsample_type="number", downsample_rate=3)
+
+
+def test_same_input_output_raises_approx(tmp_path):
+    """Same-path check fires before any I/O for approx-proportion mode too."""
+    inp = _write_mgf(tmp_path / "in.mgf", 5)
+    with pytest.raises(ValueError, match="different paths"):
+        downsample_spectra(
+            inp, inp, downsample_type="approx-proportion", downsample_rate=0.5
+        )
+
+
+# ---------------------------------------------------------------------------
+# Output order preservation
+# ---------------------------------------------------------------------------
+
+
+def test_number_output_preserves_input_order(tmp_path):
+    """Sampled spectra appear in the same relative order as in the input."""
+    inp = _write_mgf(tmp_path / "in.mgf", 20)
+    out = tmp_path / "out.mgf"
+    downsample_spectra(inp, out, downsample_type="number", downsample_rate=10)
+    input_titles = _read_titles(inp)
+    output_titles = _read_titles(out)
+    # Positions in the input must be strictly increasing
+    positions = [input_titles.index(t) for t in output_titles]
+    assert positions == sorted(positions)
+
+
+def test_proportion_output_preserves_input_order(tmp_path):
+    """Sampled spectra appear in the same relative order as in the input."""
+    inp = _write_mgf(tmp_path / "in.mgf", 20)
+    out = tmp_path / "out.mgf"
+    downsample_spectra(
+        inp, out, downsample_type="proportion", downsample_rate=0.5
+    )
+    input_titles = _read_titles(inp)
+    output_titles = _read_titles(out)
+    positions = [input_titles.index(t) for t in output_titles]
+    assert positions == sorted(positions)
+
+
+# ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
 
