@@ -63,17 +63,20 @@ def get_ground_truth(
         - ``ground_truth`` (string dtype)
             Ground-truth peptide sequence from the MGF.
 
-        - All columns from the MzTab PSM table
-            These are inserted at the spectrum indices specified by
-            ``spectra_ref``. Rows without a corresponding PSM retain missing
-            values.
+        - ``predicted`` (string dtype)
+            Predicted peptide sequence from the MzTab. Empty string for
+            spectra with no corresponding PSM row.
 
-        - ``pep_correct`` (boolean)
+        - ``pep_score`` (float64)
+            Per-PSM confidence score from the MzTab. Set to ``MIN_PEP_SCORE``
+            for spectra with no corresponding PSM row.
+
+        - ``pep_correct`` (bool)
             Exact-match correctness label computed as::
 
-                ground_truth == sequence
+                ground_truth == predicted
 
-            after optional I/L replacement.
+            after optional I/L replacement in both columns.
     """
     if not isinstance(mztab_path, pd.DataFrame):
         psm_df = pyteomics.mztab.MzTab(mztab_path).spectrum_match_table
@@ -90,31 +93,33 @@ def get_ground_truth(
         psm_df["spectra_ref"].str[len("ms_run[1]:index=") :].apply(int).to_numpy()
     )
 
-    predictions_df = pd.DataFrame({"ground_truth": ground_truth})
+    n = len(ground_truth)
+    predictions_df = pd.DataFrame(
+        {
+            "ground_truth": pd.array(ground_truth, dtype="string"),
+            "predicted": pd.array([""] * n, dtype="string"),
+            "pep_score": pd.array([MIN_PEP_SCORE] * n, dtype="float64"),
+        }
+    )
 
-    for col in psm_df.columns:
-        if col == "sequence":
-            predictions_df[col] = pd.Series(
-                "", index=range(len(ground_truth)), dtype="string"
-            )
-        elif col == "search_engine_score[1]":
-            predictions_df[col] = pd.Series(
-                MIN_PEP_SCORE, index=range(len(ground_truth)), dtype="float64"
-            )
-        else:
-            predictions_df[col] = None
-
-        col_idx = predictions_df.columns.get_loc(col)
-        predictions_df.iloc[spectra_idx, col_idx] = psm_df[col]
+    predicted_idx = predictions_df.columns.get_loc("predicted")
+    pep_score_idx = predictions_df.columns.get_loc("pep_score")
+    predictions_df.iloc[spectra_idx, predicted_idx] = psm_df["sequence"].to_numpy()
+    predictions_df.iloc[spectra_idx, pep_score_idx] = psm_df[
+        "search_engine_score[1]"
+    ].to_numpy()
 
     if replace_i_l:
         predictions_df["ground_truth"] = predictions_df["ground_truth"].str.replace(
-            "I", "L"
+            "I", "L", regex=False
+        )
+        predictions_df["predicted"] = predictions_df["predicted"].str.replace(
+            "I", "L", regex=False
         )
 
     predictions_df["pep_correct"] = (
-        predictions_df["ground_truth"] == predictions_df["sequence"]
-    )
+        predictions_df["ground_truth"] == predictions_df["predicted"]
+    ).astype(bool)
 
     return predictions_df
 
@@ -155,5 +160,8 @@ def prec_cov(
 
     precision = total_precision / total_coverage
     coverage = total_coverage / total_coverage[-1]
-    aupc = np.trapz(precision, coverage)
+    aupc = np.trapz(
+        np.concatenate([[precision[0]], precision]),
+        np.concatenate([[0.0], coverage]),
+    )
     return precision, coverage, aupc
