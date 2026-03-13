@@ -101,8 +101,6 @@ casanovo-datasets mskb_final \
 * `mskb_final.val.mgf`
 * `peptides.json`
 
-casanovo-datasets
-
 ## `full_splits`
 
 Convenience command that generates **both tryptic and multi-enzymic splits**

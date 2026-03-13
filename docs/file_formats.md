@@ -12,7 +12,7 @@ delimited by `BEGIN IONS` / `END IONS` blocks.
 
 ### Example
 
-```
+```text
 BEGIN IONS
 TITLE=spectrum_001
 PEPMASS=612.3456
@@ -38,9 +38,9 @@ space-separated.
 
 ### Notes
 
-- casanovoutils reads MGF files using
-  [Pyteomics](https://pyteomics.readthedocs.io/). Spectra are accessed in
-  order of appearance in the file.
+- For ground-truth evaluation, casanovoutils reads `SEQ=` entries from MGF
+  files directly in order of appearance. Other MGF operations use
+  [Pyteomics](https://pyteomics.readthedocs.io/).
 - Spectrum indices used in the mzTab `spectra_ref` column (see below) are
   **zero-based** positions within the MGF file.
 - The `SEQ=` field is required for ground-truth evaluation. Casanovo writes
@@ -66,7 +66,7 @@ produced by Casanovo as its primary output format.
 
 casanovoutils expects `spectra_ref` values of the form:
 
-```
+```text
 ms_run[1]:index=<INT>
 ```
 
@@ -75,7 +75,7 @@ MGF file. This is the format written by Casanovo.
 
 ### Example PSM section
 
-```
+```tsv
 PSH	sequence	PSM_ID	accession	unique	database	...	spectra_ref	search_engine_score[1]	...
 PSM	PEPTIDEK	1	null	null	null	...	ms_run[1]:index=0	0.9982	...
 PSM	ACDEFGHIK	2	null	null	null	...	ms_run[1]:index=1	0.8741	...
@@ -85,9 +85,9 @@ PSM	ACDEFGHIK	2	null	null	null	...	ms_run[1]:index=1	0.8741	...
 
 - casanovoutils reads mzTab files using
   [Pyteomics](https://pyteomics.readthedocs.io/).
-- Only spectra present in the mzTab are evaluated; spectra in the MGF that
-  have no corresponding mzTab row are assigned a score of `-1.0` and marked as
-  incorrect.
+- All MGF spectra are considered. Spectra absent from the mzTab are assigned
+  a score of `-1.0` and marked as incorrect, so they appear at the bottom of
+  the ranked list and count against coverage.
 - Additional columns present in the mzTab (e.g., per-amino-acid score columns
   from Casanovo) are preserved in the internal DataFrame but are not used
   unless explicitly referenced.

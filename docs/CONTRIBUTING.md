@@ -14,15 +14,8 @@ Please open an issue on
 
 ## Setting up a development environment
 
-Clone the repository and install the package with development dependencies:
-
-```bash
-git clone https://github.com/Noble-Lab/casanovoutils.git
-cd casanovoutils
-pip install -e ".[dev]"
-```
-
-Or with uv:
+Clone the repository and install the package with development dependencies
+using uv:
 
 ```bash
 git clone https://github.com/Noble-Lab/casanovoutils.git
