@@ -83,6 +83,14 @@ def get_ground_truth(
     else:
         psm_df = mztab_path
 
+    required = {"spectra_ref", "sequence", "search_engine_score[1]"}
+    missing = required - set(psm_df.columns)
+    if missing:
+        raise ValueError(
+            f"PSM table is missing required column(s): {sorted(missing)}. "
+            f"Expected columns: {sorted(required)}."
+        )
+
     ground_truth = []
     with open(mgf_path) as f:
         for line in tqdm.tqdm(f, desc=f"Reading mgf file: {mgf_path}", unit="lines"):
