@@ -9,10 +9,8 @@ which automatically maps Python functions and arguments to shell commands.
 
 ## Installation / Invocation
 
-> **Note:** The `casanovo-datasets` entrypoint is not yet registered in
-> `pyproject.toml` and is not available after a standard `pip install
-> casanovoutils`. The commands below document the intended interface for a
-> future release.
+Assuming this file is named `make_splits.py`, you can invoke it directly with
+Python:
 
 ```bash
 casanovo-datasets <command> [arguments]
@@ -100,6 +98,8 @@ casanovo-datasets mskb_final \
 * `mskb_final.test.mgf`
 * `mskb_final.val.mgf`
 * `peptides.json`
+
+casanovo-datasets
 
 ## `full_splits`
 

@@ -24,14 +24,6 @@ mgf-utils = "casanovoutils.mgfutils:main"
 downsample-ms = "casanovoutils.downsample:main"
 graph-prec-cov = "casanovoutils.preccov:main"
 
-[project.optional-dependencies]
-docs = [
-    "sphinx>=7.0",
-    "myst-parser>=3.0",
-    "sphinx-book-theme>=1.0",
-    "sphinx-autoapi>=3.0",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
