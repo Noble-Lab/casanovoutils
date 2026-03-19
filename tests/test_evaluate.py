@@ -84,25 +84,22 @@ def test_get_ground_truth_dataframe_aligns_by_spectra_index(tmp_path):
     assert out["pep_correct"].tolist() == [False, True, False, False, False]
 
 
-def test_get_ground_truth_replace_i_l_bug_is_exposed(tmp_path):
+def test_get_ground_truth_replace_i_l(tmp_path):
     """
-    The current implementation calls .str.replace(...) without assignment,
-    so replace_i_l=True should NOT change behavior (this test locks in the bug).
-
-    If you later fix the bug, update/flip this test accordingly.
+    With replace_i_l=True, I and L are treated as equivalent: ground truth
+    "ILIL" should match prediction "LLLL" after I->L substitution in both.
+    Without replacement, "ILIL" != "LLLL" so pep_correct should be False.
     """
     mgf_seqs = ["ILIL", "LLLL"]
     mgf_path = _write_mgf(tmp_path, mgf_seqs)
 
-    # Predict "LLLL" for spectrum 0; would become correct if I->L replacement worked.
     psm = _psm_df(indices=[0], sequences=["LLLL"], scores=[1.0])
 
     out_no_replace = get_ground_truth(psm, mgf_path, replace_i_l=False)
     out_replace = get_ground_truth(psm, mgf_path, replace_i_l=True)
 
-    # Both should be incorrect for row 0 given the current bug
-    assert out_no_replace.loc[0, "pep_correct"] is False
-    assert out_replace.loc[0, "pep_correct"] is False
+    assert not out_no_replace.loc[0, "pep_correct"]
+    assert out_replace.loc[0, "pep_correct"]
 
 
 def test_get_ground_truth_raises_on_bad_spectra_ref_format(tmp_path):
@@ -148,7 +145,7 @@ def test_get_ground_truth_mztab_path_uses_pyteomics_reader(monkeypatch, tmp_path
 
     assert out.loc[2, "predicted"] == "CCC"
     assert float(out.loc[2, "pep_score"]) == 9.0
-    assert out.loc[2, "pep_correct"] is True
+    assert out.loc[2, "pep_correct"]
 
 
 # -------------------------
