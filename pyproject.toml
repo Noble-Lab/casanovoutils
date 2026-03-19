@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { email = "gwenneth.straub@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "fire>=0.7.1",
     "matplotlib>=3.10.7",
@@ -14,6 +14,7 @@ dependencies = [
     "pandas>=2.3.3",
     "polars>=1.35.2",
     "pyteomics>=4.7.5",
+    "spectrum_utils>=0.5.0",
     "pyyaml>=6.0.3",
     "tqdm>=4.67.1",
 ]
@@ -23,6 +24,11 @@ casanovo-utils = "casanovoutils:main"
 mgf-utils = "casanovoutils.mgfutils:main"
 downsample-ms = "casanovoutils.downsample:main"
 graph-prec-cov = "casanovoutils.preccov:main"
+charge-distribution = "casanovoutils.summarize_mgf:charge_distribution_main"
+fragment-coverage = "casanovoutils.summarize_mgf:fragment_coverage_main"
+peak-counts = "casanovoutils.summarize_mgf:peak_counts_main"
+peptide-lengths = "casanovoutils.summarize_mgf:peptide_lengths_main"
+summarize-mgf = "casanovoutils.summarize_mgf:summarize_mgf_main"
 
 [project.optional-dependencies]
 docs = [
