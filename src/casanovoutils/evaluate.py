@@ -9,7 +9,7 @@ MIN_PEP_SCORE = -1.0
 
 
 def get_ground_truth(
-    mztab_path: PathLike | pd.DataFrame, mgf_path: list[PathLike], replace_i_l: bool = False
+    mztab_path: PathLike | pd.DataFrame, mgf_path: list[PathLike] | PathLike, replace_i_l: bool = False
 ) -> tuple[tuple[np.ndarray, bool], np.ndarray, np.ndarray]:
     """
     Align MzTab PSM predictions to MGF-provided ground-truth sequences.
@@ -45,8 +45,8 @@ def get_ground_truth(
 
         Any additional columns present in the PSM table are also propagated
         into the output DataFrame.
-    mgf_path : PathLike
-        Path to an MGF file containing ground-truth peptide sequences encoded as
+    mgf_path : list[Pathlike] or PathLike
+        Path to an MGF file (or list of multiple MGF paths) containing ground-truth peptide sequences encoded as
         ``SEQ=<PEPTIDE>`` lines. Each such line defines one spectrum entry in
         order of appearance.
     replace_i_l : bool, default=False
