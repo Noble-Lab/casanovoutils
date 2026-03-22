@@ -9,7 +9,7 @@ MIN_PEP_SCORE = -1.0
 
 
 def get_ground_truth(
-    mztab_path: PathLike | pd.DataFrame, mgf_path: PathLike, replace_i_l: bool = False
+    mztab_path: PathLike | pd.DataFrame, mgf_path: list[PathLike], replace_i_l: bool = False
 ) -> tuple[tuple[np.ndarray, bool], np.ndarray, np.ndarray]:
     """
     Align MzTab PSM predictions to MGF-provided ground-truth sequences.
@@ -81,31 +81,49 @@ def get_ground_truth(
         psm_df = mztab_path
 
     ground_truth = []
-    with open(mgf_path) as f:
-        for line in tqdm.tqdm(f, desc=f"Reading mgf file: {mgf_path}", unit="lines"):
-            if line.startswith("SEQ="):
-                ground_truth.append(line.removeprefix("SEQ=").strip())
+    if isinstance(mgf_path, str): 
+        mgf_path = [mgf_path]
 
-    spectra_idx = (
-        psm_df["spectra_ref"].str[len("ms_run[1]:index=") :].apply(int).to_numpy()
-    )
+    for path in mgf_path:
+        gt = []
+        with open(path) as f:
+            for line in tqdm.tqdm(f, desc=f"Reading mgf file: {path}", unit="lines"):
+                if line.startswith("SEQ="):
+                    gt.append(line.removeprefix("SEQ=").strip())
+        ground_truth.append(gt)
 
-    predictions_df = pd.DataFrame({"ground_truth": ground_truth})
+    overall_spectra_idx = []
+    overall_run_masks = []  
+    for i in range(len(ground_truth)):
+        run_mask = psm_df["spectra_ref"].str.startswith(f"ms_run[{i + 1}]")
+        overall_run_masks.append(run_mask) 
+        spectra_idx = (
+            psm_df[run_mask]["spectra_ref"].str[len(f"ms_run[{i + 1}]:index="):].apply(int).to_numpy()
+        )
+        overall_spectra_idx.append(spectra_idx)
+
+    predictions_df = pd.DataFrame({"ground_truth": [item for gt in ground_truth for item in gt]})
+
+    total_spectra = sum(len(gt) for gt in ground_truth)  
+    lengths = [len(gt) for gt in ground_truth]
+    offsets = [0] + [sum(lengths[:i]) for i in range(1, len(lengths))]
 
     for col in psm_df.columns:
         if col == "sequence":
             predictions_df[col] = pd.Series(
-                "", index=range(len(ground_truth)), dtype="string"
+                "", index=range(total_spectra), dtype="string"  
             )
         elif col == "search_engine_score[1]":
             predictions_df[col] = pd.Series(
-                MIN_PEP_SCORE, index=range(len(ground_truth)), dtype="float64"
+                MIN_PEP_SCORE, index=range(total_spectra), dtype="float64"  
             )
         else:
             predictions_df[col] = None
 
         col_idx = predictions_df.columns.get_loc(col)
-        predictions_df.iloc[spectra_idx, col_idx] = psm_df[col]
+        for i, (spectra_idx, run_mask) in enumerate(zip(overall_spectra_idx, overall_run_masks)): 
+            global_idx = spectra_idx + offsets[i] 
+            predictions_df.iloc[global_idx, col_idx] = psm_df[run_mask][col].values
 
     if replace_i_l:
         predictions_df["ground_truth"] = predictions_df["ground_truth"].str.replace(
@@ -155,5 +173,5 @@ def prec_cov(
 
     precision = total_precision / total_coverage
     coverage = total_coverage / total_coverage[-1]
-    aupc = np.trapz(precision, coverage)
+    aupc = np.trapezoid(precision, coverage)
     return precision, coverage, aupc
