@@ -15,6 +15,7 @@ dependencies = [
     "polars>=1.35.2",
     "pyteomics>=4.7.5",
     "pyyaml>=6.0.3",
+    "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
 
