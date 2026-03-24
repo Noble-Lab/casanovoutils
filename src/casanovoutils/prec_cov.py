@@ -275,6 +275,14 @@ def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame
     )
 
     is_correct = pc_df.get_column("pc_is_correct").to_numpy()
+
+    if len(is_correct) == 0:
+        logging.warning("No correct predictions found")
+        return pc_df.with_columns(
+            pl.lit(None).alias("pc_precision"),
+            pl.lit(None).alias("pc_coverage"),
+        )
+
     n_correct = is_correct.sum()
     logging.info(
         "Correctness: %d / %d (%.1f%%)",
@@ -652,7 +660,7 @@ def graph_prec_cov(*pc_df_paths: PathLike, out_path: Optional[PathLike] = None) 
 
     try:
         graph_pc.show()
-    except:
+    except Exception:
         logging.warning("Tried to show precision coverage plot.")
         logging.warning("Is a graphical backend installed?")
         logging.warning(

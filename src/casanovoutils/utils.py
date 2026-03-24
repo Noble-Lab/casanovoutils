@@ -417,7 +417,7 @@ def configure_logging(log_file: Optional[PathLike] = None) -> None:
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s | %(levelname)s | %(message)s",
         handlers=handlers,
     )
 
