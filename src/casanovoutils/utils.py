@@ -1,3 +1,17 @@
+"""
+Data loading and preprocessing utilities for MGF and mzTab PSM files.
+
+Provides functions to parse raw instrument files into Polars DataFrames,
+join predicted and ground truth annotations, and tokenize peptide sequences
+for downstream evaluation. All loaded DataFrames accept either a file path
+or an already-loaded DataFrame, allowing the functions to be composed
+freely without redundant I/O.
+
+The module is also executable as a CLI via ``python -m casanovoutils.utils``
+(or the installed ``casanovoutils`` entry point), exposing ``get_mgf_psms``,
+``get_mztab``, and ``get_groundtruth`` as subcommands.
+"""
+
 import logging
 import pathlib
 import sys

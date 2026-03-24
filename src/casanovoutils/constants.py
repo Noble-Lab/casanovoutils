@@ -1,5 +1,6 @@
 import polars as pl
 
+
 class Constants:
     """
     Global constants for column names and sentinel values.
@@ -32,7 +33,7 @@ class Constants:
     predicted_tokens: str = "mztab_tokens"
     ground_truth_tokens: str = "mgf_tokens"
     min_score: float = -1.0
-    
+
     @staticmethod
     def get_pred_sequence_column(df: pl.DataFrame) -> str:
         """

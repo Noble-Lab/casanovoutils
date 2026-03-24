@@ -1,3 +1,24 @@
+"""
+Precision-coverage computation for peptide and amino acid evaluation.
+
+Provides an end-to-end pipeline that takes predicted and ground truth PSM
+DataFrames, aligns token sequences with gap insertion, and computes cumulative
+precision-coverage (Prec-Cov) curves. Results can be exported as DataFrames
+or rendered as matplotlib figures.
+
+The main entry points are:
+
+- :func:`get_prec_cov_df` — builds a precision-coverage DataFrame at either
+  peptide or amino acid level.
+- :func:`graph_prec_cov` — plots pre-computed precision-coverage DataFrames.
+- :class:`GraphPrecCov` — stateful plot builder, intended for programmatic or
+  CLI use via Fire.
+
+The module is also executable as a CLI via ``python -m casanovoutils.prec_cov``
+(or the installed ``casanovoutils`` entry point), exposing ``get_pc_df`` and
+``graph_prec_cov`` as subcommands.
+"""
+
 import dataclasses
 import functools
 import logging
@@ -14,8 +35,8 @@ import tqdm
 from .align import align_tokens_with_gaps
 from .constants import Constants
 from .utils import (
-    configure_logging,
     DfPath,
+    configure_logging,
     get_ground_truth_df,
     read_dataframe,
     tokenize_sequences,
@@ -188,10 +209,9 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
     Parameters
     ----------
-    ignore_scores : bool
-        Passed through to :func:`align_tokens_with_gaps`. If ``True``,
-        alignment uses a constant match score of ``1.0`` rather than
-        per-token values from the scores list.
+    tie_break_suffix : bool
+        Passed through to :func:`align_tokens_with_gaps`. Controls tie-breaking
+        behaviour when the gap and no-gap paths score equally during traceback.
     row : dict[str, Any]
         A single row represented as a dict, as produced by
         ``DataFrame.iter_rows(named=True)``.
@@ -199,8 +219,8 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
     Returns
     -------
     dict[str, Any]
-        The same row dict with ``pred_col``,
-        ``Constants.ground_truth_sequence_column``,
+        The same row dict with ``Constants.predicted_tokens``,
+        ``Constants.ground_truth_tokens``,
         ``Constants.aa_scores_column``, and ``Constants.aa_idx_column``
         replaced by their gap-aligned counterparts.
     """
@@ -208,7 +228,7 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
         row[Constants.predicted_tokens],
         row[Constants.ground_truth_tokens],
         row[Constants.aa_scores_column],
-        ignore_scores=tie_break_suffix,
+        tie_break_suffix=tie_break_suffix,
     )
 
     row[Constants.predicted_tokens] = aligned_predicted
@@ -454,9 +474,9 @@ def align_and_explode(
     df : pl.DataFrame
         Input DataFrame with tokenized predicted and ground truth sequence
         columns and parsed per-amino-acid scores.
-    align_ignore_aa_scores : bool
-        If ``True``, alignment uses a constant match score of ``1.0`` rather
-        than per-token values from the aa scores column.
+    tie_break_suffix : bool
+        Passed through to :func:`mutate_row_as_dict`. Controls tie-breaking
+        behavior when the gap and no-gap paths score equally during traceback.
 
     Returns
     -------
@@ -534,10 +554,10 @@ def get_prec_cov_df(
         explode the DataFrame so each row corresponds to a single amino acid
         position. If ``False`` (default), metrics are computed at the peptide
         level using the peptide-level score column.
-    align_ignore_aa_scores : bool, optional
+    align_tie_beak_suffix : bool, optional
         Passed through to the alignment step when ``aa_level`` is ``True``.
-        If ``True``, alignment uses a constant match score of ``1.0`` rather
-        than per-token values from the aa scores column.
+        Controls tie-breaking behavior when the gap and no-gap paths score
+        equally during traceback. Defaults to ``True``.
     out_path : PathLike, optional
         If provided, the resulting DataFrame is written to this path before
         being returned. The format is inferred from the file extension.

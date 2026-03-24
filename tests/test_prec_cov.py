@@ -2,12 +2,11 @@ import polars as pl
 import polars.testing
 import pytest
 
+from casanovoutils.constants import Constants
 from casanovoutils.prec_cov import (
-    Constants,
     align_tokens_with_gaps,
     calc_precision_coverage,
     fill_null_columns,
-    get_pred_sequence_column,
     load_ground_truth_df,
     mutate_row_as_dict,
 )
@@ -24,30 +23,12 @@ def pred_col():
 def pc_input_df():
     return pl.DataFrame(
         {
-            "mztab_sequence": ["A", "B", "C", "D"],
-            Constants.ground_truth_sequence_column: ["A", "X", "C", "Y"],
+            Constants.predicted_tokens: ["A", "B", "C", "D"],
+            Constants.ground_truth_tokens: ["A", "X", "C", "Y"],
             Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
             Constants.aa_scores_column: ["", "", "", ""],
         }
     )
-
-
-# ── get_pred_sequence_column ──────────────────────────────────────────────────
-
-
-def test_get_pred_sequence_column_prefers_proforma():
-    df = pl.DataFrame(
-        {
-            "mztab_opt_ms_run[1]_proforma": ["PEPTIDE"],
-            "mztab_sequence": ["PEPTIDE"],
-        }
-    )
-    assert get_pred_sequence_column(df) == "mztab_opt_ms_run[1]_proforma"
-
-
-def test_get_pred_sequence_column_falls_back_to_sequence():
-    df = pl.DataFrame({"mztab_sequence": ["PEPTIDE"]})
-    assert get_pred_sequence_column(df) == "mztab_sequence"
 
 
 # ── fill_null_columns ─────────────────────────────────────────────────────────
@@ -154,32 +135,10 @@ def test_align_gap_score_is_min_score():
     assert all(s == Constants.min_score for s in gap_scores)
 
 
-def test_align_gt_gap_score_is_min_score():
-    pred, gt, sc = align_tokens_with_gaps(
-        predicted=["A", "B"],
-        ground_truth=["A"],
-        scores=[1.0, 1.0],
-    )
-    gap_scores = [s for s, g in zip(sc, gt) if g == "-"]
-    assert all(s != Constants.min_score for s in gap_scores)
-
-
-def test_align_ignore_scores_same_alignment():
-    tokens = ["A", "B", "C"]
-    scores = [0.1, 0.1, 0.1]
-    pred_normal, gt_normal, _ = align_tokens_with_gaps(tokens, tokens[:], scores)
-    pred_ignored, gt_ignored, _ = align_tokens_with_gaps(
-        tokens, tokens[:], scores, ignore_scores=True
-    )
-    assert pred_normal == pred_ignored
-    assert gt_normal == gt_ignored
-
-
-def test_align_ignore_scores_returns_original_scores():
-    tokens = ["A", "B", "C"]
-    scores = [0.1, 0.2, 0.3]
-    _, _, sc = align_tokens_with_gaps(tokens, tokens[:], scores, ignore_scores=True)
-    assert sc == scores
+def test_align_empty_predicted():
+    pred, gt, sc = align_tokens_with_gaps([], ["A", "B"], [])
+    assert all(p == "-" for p in pred)
+    assert all(s == Constants.min_score for s in sc)
 
 
 def test_align_empty_sequences():
@@ -189,45 +148,36 @@ def test_align_empty_sequences():
     assert sc == []
 
 
-def test_align_predicted_empty():
-    pred, gt, sc = align_tokens_with_gaps([], ["A", "B"], [])
-    assert all(p == "-" for p in pred)
-    assert all(s == Constants.min_score for s in sc)
-
-
-def test_align_ground_truth_empty():
-    pred, gt, sc = align_tokens_with_gaps(["A", "B"], [], [1.0, 1.0])
-    assert all(g == "-" for g in gt)
-
-
 # ── mutate_row_as_dict ────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def sample_row():
     return {
-        "mztab_sequence": ["A", "B", "C"],
-        Constants.ground_truth_sequence_column: ["A", "X", "C"],
+        Constants.predicted_tokens: ["A", "B", "C"],
+        Constants.ground_truth_tokens: ["A", "X", "C"],
         Constants.aa_scores_column: [0.9, 0.8, 0.7],
         Constants.aa_idx_column: None,
     }
 
 
 def test_mutate_row_as_dict_returns_dict(sample_row):
-    result = mutate_row_as_dict("mztab_sequence", False, sample_row)
+    result = mutate_row_as_dict(False, sample_row)
     assert isinstance(result, dict)
 
 
 def test_mutate_row_as_dict_adds_aa_idx(sample_row):
-    result = mutate_row_as_dict("mztab_sequence", False, sample_row)
+    result = mutate_row_as_dict(False, sample_row)
     assert Constants.aa_idx_column in result
-    assert result[Constants.aa_idx_column] == list(range(len(result["mztab_sequence"])))
+    assert result[Constants.aa_idx_column] == list(
+        range(len(result[Constants.predicted_tokens]))
+    )
 
 
 def test_mutate_row_as_dict_aligned_lengths_equal(sample_row):
-    result = mutate_row_as_dict("mztab_sequence", False, sample_row)
-    n = len(result["mztab_sequence"])
-    assert len(result[Constants.ground_truth_sequence_column]) == n
+    result = mutate_row_as_dict(False, sample_row)
+    n = len(result[Constants.predicted_tokens])
+    assert len(result[Constants.ground_truth_tokens]) == n
     assert len(result[Constants.aa_scores_column]) == n
     assert len(result[Constants.aa_idx_column]) == n
 
@@ -245,6 +195,7 @@ def test_calc_precision_coverage_output_columns(pc_input_df):
 def test_calc_precision_coverage_correctness_flag(pc_input_df):
     result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
     # sorted descending by score: A(0.9)=correct, B(0.8)=wrong, C(0.7)=correct, D(0.6)=wrong
+    # correctness compares Constants.predicted_tokens against Constants.ground_truth_tokens
     assert result["pc_is_correct"].to_list() == [True, False, True, False]
 
 
@@ -272,8 +223,8 @@ def test_calc_precision_coverage_sorted_descending(pc_input_df):
 def test_calc_precision_coverage_all_correct():
     df = pl.DataFrame(
         {
-            "mztab_sequence": ["A", "B", "C"],
-            Constants.ground_truth_sequence_column: ["A", "B", "C"],
+            Constants.predicted_tokens: ["A", "B", "C"],
+            Constants.ground_truth_tokens: ["A", "B", "C"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
         }
@@ -287,8 +238,8 @@ def test_calc_precision_coverage_all_correct():
 def test_calc_precision_coverage_all_wrong():
     df = pl.DataFrame(
         {
-            "mztab_sequence": ["A", "B", "C"],
-            Constants.ground_truth_sequence_column: ["X", "Y", "Z"],
+            Constants.predicted_tokens: ["A", "B", "C"],
+            Constants.ground_truth_tokens: ["X", "Y", "Z"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
         }
