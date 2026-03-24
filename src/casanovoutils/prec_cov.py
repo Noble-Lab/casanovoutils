@@ -232,7 +232,7 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
     )
 
     row[Constants.predicted_tokens] = aligned_predicted
-    row[Constants.ground_truth_sequence_column] = aligned_ground_truth
+    row[Constants.ground_truth_tokens] = aligned_ground_truth
     row[Constants.aa_scores_column] = aligned_scores
     row[Constants.aa_idx_column] = list(range(len(aligned_predicted)))
 

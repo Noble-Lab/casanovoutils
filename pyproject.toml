@@ -16,6 +16,7 @@ dependencies = [
     "pyteomics>=4.7.5",
     "pyyaml>=6.0.3",
     "seaborn>=0.13.2",
+    "tabulate>=0.10.0",
     "tqdm>=4.67.1",
 ]
 
