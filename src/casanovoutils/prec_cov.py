@@ -60,9 +60,9 @@ class GraphPrecCov:
 
     Parameters
     ----------
-    fig_width : float, default=3.0
+    fig_width : float, default=4.0
         Width of the matplotlib figure in inches.
-    fig_height : float, default=3.0
+    fig_height : float, default=4.0
         Height of the matplotlib figure in inches.
     fig_dpi : int, default=150
         Figure resolution in dots per inch.
