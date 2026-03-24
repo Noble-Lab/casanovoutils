@@ -44,8 +44,8 @@ class Constants:
 
         Parameters
         ----------
-        ground_truth_df : pl.DataFrame
-            A ground truth DataFrame expected to contain either
+        df : pl.DataFrame
+            A DataFrame expected to contain either
             ``"mztab_opt_ms_run[1]_proforma"`` or ``"mztab_sequence"``.
 
         Returns
