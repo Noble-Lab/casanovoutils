@@ -45,10 +45,13 @@ def get_aligned_dp_array(short: list[str], long: list[str]) -> np.ndarray:
     s = len(short)
     l = len(long)
     dp = np.zeros((s + 1, l + 1), dtype=np.int32)
-    dp[:-1, -1] = -1
+    dp[:, -(s + 1) :] = np.triu(np.full((s + 1, s + 1), -1), k=1)
 
     for curr_s in range(s - 1, -1, -1):
         for curr_l in range(l - 1, -1, -1):
+            if dp[curr_s, curr_l] == -1:
+                continue
+
             is_match = int(short[curr_s] == long[curr_l])
             no_gap_score = is_match + dp[curr_s + 1, curr_l + 1]
             gap_score = dp[curr_s, curr_l + 1]

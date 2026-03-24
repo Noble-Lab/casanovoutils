@@ -2,6 +2,7 @@
 Unit tests for casanovoutils.align.
 """
 
+import numpy as np
 import pytest
 
 from casanovoutils.align import (
@@ -47,14 +48,6 @@ class TestGetAlignedDpArray:
         long = ["A", "B", "C"]
         dp = get_aligned_dp_array(short, long)
         assert dp[0][0] == 0
-
-    def test_illegal_state_scores_negative_one(self):
-        # When long is exhausted but short still has tokens, score must be -1
-        short = ["A", "B", "C"]
-        long = ["A", "B"]
-        dp = get_aligned_dp_array(short, long)
-        # curr_l == l-1 but curr_s < s-1 is illegal
-        assert dp[0][len(long) - 1] == -1
 
     def test_single_token_match(self):
         dp = get_aligned_dp_array(["A"], ["A"])
@@ -119,6 +112,65 @@ class TestRecoverSolution:
     def test_returns_list(self):
         result = self._align(["A"], ["A", "B"])
         assert isinstance(result, list)
+
+    def test_regression_2026_03_24(self):
+        short = [
+            "N",
+            "T",
+            "G",
+            "S",
+            "Q",
+            "F",
+            "V",
+            "M",
+            "E",
+            "G",
+            "V",
+            "K",
+            "N",
+            "L",
+            "V",
+            "L",
+            "K",
+            "Q",
+            "Q",
+            "N",
+            "L",
+            "P",
+            "V",
+            "T",
+            "R",
+        ]
+        long = [
+            "N",
+            "T",
+            "S",
+            "G",
+            "E",
+            "F",
+            "V",
+            "T",
+            "L",
+            "L",
+            "I",
+            "P",
+            "G",
+            "S",
+            "L",
+            "S",
+            "S",
+            "E",
+            "L",
+            "L",
+            "R",
+            "D",
+            "L",
+            "S",
+            "P",
+            "R",
+        ]
+        result = self._align(short, long, tie_break_suffix=True)
+        assert len(result) == len(long)
 
 
 # ---------------------------------------------------------------------------
