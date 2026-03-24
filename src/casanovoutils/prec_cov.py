@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import logging
 import pathlib
-import sys
 from os import PathLike
 from typing import Any, Optional
 
@@ -12,47 +11,16 @@ import numpy as np
 import polars as pl
 import tqdm
 
+from .align import align_tokens_with_gaps
+from .constants import Constants
 from .utils import (
+    configure_logging,
     DfPath,
     get_ground_truth_df,
     read_dataframe,
     tokenize_sequences,
     write_dataframe,
 )
-
-
-class Constants:
-    """
-    Global constants for column names and sentinel values.
-
-    Attributes
-    ----------
-    ground_truth_sequence_column : str
-        Name of the column holding ground truth peptide sequences.
-    aa_scores_column : str
-        Name of the column holding per-amino-acid score strings.
-    pep_score_column : str
-        Name of the column holding peptide-level search engine scores.
-    aa_idx_column : str
-        Name of the column holding per-amino-acid positional indices,
-        added during alignment and explosion.
-    precision_column : str
-        Name of the column holding cumulative precision values computed
-        by :func:`calc_precision_coverage`.
-    coverage_column : str
-        Name of the column holding cumulative coverage values computed
-        by :func:`calc_precision_coverage`.
-    min_score : float
-        Sentinel score assigned to gap positions during sequence alignment.
-    """
-
-    ground_truth_sequence_column: str = "mgf_seq"
-    aa_scores_column: str = "opt_ms_run[1]_aa_scores"
-    pep_score_column: str = "search_engine_score[1]"
-    aa_idx_column: str = "pc_aa_idx"
-    precision_column: str = "pc_precision"
-    coverage_column: str = "pc_coverage"
-    min_score: float = -1.0
 
 
 @dataclasses.dataclass
@@ -114,6 +82,8 @@ class GraphPrecCov:
         self,
         pc_df: pl.DataFrame,
         series_name: str,
+        color: Optional[str] = None,
+        linestyle: Optional[str] = None,
     ) -> None:
         """
         Add a precision-coverage curve for a single dataset to the plot.
@@ -131,6 +101,13 @@ class GraphPrecCov:
             :func:`calc_precision_coverage`.
         series_name : str
             Display name for this dataset in the plot legend.
+        color : str, optional
+            Line color passed to ``matplotlib.axes.Axes.plot``. If ``None``
+            (default), matplotlib's automatic color cycling is used.
+        linestyle : str, optional
+            Line style passed to ``matplotlib.axes.Axes.plot`` (e.g. ``"-"``,
+            ``"--"``, ``":"``). If ``None`` (default), matplotlib's default
+            solid line style is used.
 
         Returns
         -------
@@ -140,7 +117,13 @@ class GraphPrecCov:
         coverage = pc_df.get_column(Constants.coverage_column).to_numpy()
         aupc = np.trapz(precision, coverage)
 
-        self.ax.plot(coverage, precision, label=f"{series_name} {aupc:.3f}")
+        kwargs = {}
+        if color is not None:
+            kwargs["color"] = color
+        if linestyle is not None:
+            kwargs["linestyle"] = linestyle
+
+        self.ax.plot(coverage, precision, label=f"{series_name} {aupc:.4f}", **kwargs)
         self.ax.legend(loc="lower left")
 
     def clear(self) -> None:
@@ -164,7 +147,7 @@ class GraphPrecCov:
         self.ax.set_ylim(0, 1)
         self.ax.set_xlabel(self.ax_x_label)
         self.ax.set_ylabel(self.ax_y_label)
-        self.ax.set_title(f"{self.ax_title} (Amino Acid)")
+        self.ax.set_title(self.ax_title)
 
     def save(self, save_path: PathLike) -> None:
         """
@@ -194,133 +177,7 @@ class GraphPrecCov:
         self.fig.show()
 
 
-def align_tokens_with_gaps(
-    predicted: list[str],
-    ground_truth: list[str],
-    scores: list[float],
-    gap: str = "-",
-    ignore_scores: bool = False,
-) -> tuple[list[str], list[str], list[float]]:
-    """
-    Align predicted and ground truth token sequences by inserting gaps.
-
-    Scoring:
-    - match: the corresponding value in ``scores`` for the predicted token,
-      or ``1.0`` if ``ignore_scores`` is ``True``
-    - mismatch: 0
-    - gap: ``Constants.min_score``
-
-    Parameters
-    ----------
-    predicted : list[str]
-        The predicted token sequence.
-    ground_truth : list[str]
-        The ground truth token sequence.
-    scores : list[float]
-        Per-token scores for ``predicted``, must be the same length as ``predicted``.
-        When predicted token ``i`` matches a ground truth token, ``scores[i]`` is used
-        as the match score, unless ``ignore_scores`` is ``True``.
-    gap : str, optional
-        The gap character to insert for unmatched positions (default ``"-"``).
-    ignore_scores : bool, optional
-        If ``True``, the dynamic programming alignment uses a constant match
-        score of ``1.0`` instead of values from ``scores``. The returned
-        aligned scores array still reflects values from ``scores``.
-
-    Returns
-    -------
-    tuple[list[str], list[str], list[float]]
-        Three aligned sequences of equal length: the aligned predicted tokens,
-        aligned ground truth tokens, and aligned scores (with ``Constants.min_score``
-        for gap positions).
-    """
-    n, m = len(predicted), len(ground_truth)
-    dp_scores = [1.0] * n if ignore_scores else scores
-
-    dp = [[0.0] * (m + 1) for _ in range(n + 1)]
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            match_score = dp[i - 1][j - 1] + (
-                dp_scores[i - 1] if predicted[i - 1] == ground_truth[j - 1] else 0.0
-            )
-            gap_in_predicted = dp[i][j - 1]
-            gap_in_ground_truth = dp[i - 1][j]
-            dp[i][j] = max(match_score, gap_in_predicted, gap_in_ground_truth)
-
-    aligned_predicted: list[str] = []
-    aligned_ground_truth: list[str] = []
-    aligned_scores: list[float] = []
-
-    i, j = n, m
-    while i > 0 and j > 0:
-        diag_score = dp[i - 1][j - 1] + (
-            dp_scores[i - 1] if predicted[i - 1] == ground_truth[j - 1] else 0.0
-        )
-        if dp[i][j] == diag_score:
-            aligned_predicted.append(predicted[i - 1])
-            aligned_ground_truth.append(ground_truth[j - 1])
-            aligned_scores.append(scores[i - 1])
-            i -= 1
-            j -= 1
-        elif dp[i][j] == dp[i][j - 1]:
-            aligned_predicted.append(gap)
-            aligned_ground_truth.append(ground_truth[j - 1])
-            aligned_scores.append(Constants.min_score)
-            j -= 1
-        else:
-            aligned_predicted.append(predicted[i - 1])
-            aligned_ground_truth.append(gap)
-            aligned_scores.append(scores[i - 1])
-            i -= 1
-
-    while i > 0:
-        aligned_predicted.append(predicted[i - 1])
-        aligned_ground_truth.append(gap)
-        aligned_scores.append(scores[i - 1])
-        i -= 1
-
-    while j > 0:
-        aligned_predicted.append(gap)
-        aligned_ground_truth.append(ground_truth[j - 1])
-        aligned_scores.append(Constants.min_score)
-        j -= 1
-
-    aligned_predicted.reverse()
-    aligned_ground_truth.reverse()
-    aligned_scores.reverse()
-
-    return aligned_predicted, aligned_ground_truth, aligned_scores
-
-
-def get_pred_sequence_column(ground_truth_df: pl.DataFrame) -> str:
-    """
-    Determine the name of the predicted sequence column.
-
-    Checks for the presence of a ProForma-formatted prediction column first,
-    falling back to the plain mzTab sequence column if it is absent.
-
-    Parameters
-    ----------
-    ground_truth_df : pl.DataFrame
-        A ground truth DataFrame expected to contain either
-        ``"mztab_opt_ms_run[1]_proforma"`` or ``"mztab_sequence"``.
-
-    Returns
-    -------
-    str
-        The name of the predicted sequence column.
-    """
-    if "mztab_opt_ms_run[1]_proforma" in ground_truth_df:
-        pred_col = "mztab_opt_ms_run[1]_proforma"
-    else:
-        pred_col = "mztab_sequence"
-
-    return pred_col
-
-
-def mutate_row_as_dict(
-    pred_col: str, ignore_scores: bool, row: dict[str, Any]
-) -> dict[str, Any]:
+def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str, Any]:
     """
     Align predicted and ground truth token sequences within a single row dict.
 
@@ -331,8 +188,6 @@ def mutate_row_as_dict(
 
     Parameters
     ----------
-    pred_col : str
-        Key in ``row`` holding the predicted token sequence.
     ignore_scores : bool
         Passed through to :func:`align_tokens_with_gaps`. If ``True``,
         alignment uses a constant match score of ``1.0`` rather than
@@ -350,13 +205,13 @@ def mutate_row_as_dict(
         replaced by their gap-aligned counterparts.
     """
     aligned_predicted, aligned_ground_truth, aligned_scores = align_tokens_with_gaps(
-        row[pred_col],
-        row[Constants.ground_truth_sequence_column],
+        row[Constants.predicted_tokens],
+        row[Constants.ground_truth_tokens],
         row[Constants.aa_scores_column],
-        ignore_scores=ignore_scores,
+        ignore_scores=tie_break_suffix,
     )
 
-    row[pred_col] = aligned_predicted
+    row[Constants.predicted_tokens] = aligned_predicted
     row[Constants.ground_truth_sequence_column] = aligned_ground_truth
     row[Constants.aa_scores_column] = aligned_scores
     row[Constants.aa_idx_column] = list(range(len(aligned_predicted)))
@@ -390,19 +245,32 @@ def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame
         columns: ``"pc_is_correct"`` (bool), ``"pc_precision"`` (float),
         and ``"pc_coverage"`` (float).
     """
-    pred_col = get_pred_sequence_column(pc_df)
+    logging.debug("Computing precision-coverage using score column '%s'", score_col)
+
     pc_df = pc_df.sort(score_col, descending=True)
     pc_df = pc_df.with_columns(
-        (pl.col(pred_col) == pl.col(Constants.ground_truth_sequence_column)).alias(
-            "pc_is_correct"
-        )
+        (
+            pl.col(Constants.ground_truth_tokens) == pl.col(Constants.predicted_tokens)
+        ).alias("pc_is_correct")
     )
 
     is_correct = pc_df.get_column("pc_is_correct").to_numpy()
+    n_correct = is_correct.sum()
+    logging.info(
+        "Correctness: %d / %d (%.1f%%)",
+        n_correct,
+        len(is_correct),
+        100 * n_correct / len(is_correct),
+    )
+
     total_coverage = np.arange(1, len(is_correct) + 1)
     total_precision = np.cumsum(is_correct)
     precision = total_precision / total_coverage
     coverage = total_coverage / total_coverage[-1]
+
+    logging.debug(
+        "Precision-coverage curve: precision at full coverage = %.3f", precision[-1]
+    )
 
     pc_df = pc_df.with_columns(
         pl.Series("pc_precision", precision), pl.Series("pc_coverage", coverage)
@@ -452,9 +320,15 @@ def load_ground_truth_df(
         )
 
     if ground_truth_df is not None:
-        return read_dataframe(ground_truth_df)
+        logging.info("Loading ground truth DataFrame from provided source")
+        result = read_dataframe(ground_truth_df)
+        logging.info("Loaded ground truth DataFrame with %d rows", len(result))
+        return result
 
-    return get_ground_truth_df(mgf_df, mztab_df)
+    logging.info("Constructing ground truth DataFrame from MGF and mzTab sources")
+    result = get_ground_truth_df(mgf_df, mztab_df)
+    logging.info("Constructed ground truth DataFrame with %d rows", len(result))
+    return result
 
 
 def fill_null_columns(df: pl.DataFrame, pred_col: str) -> pl.DataFrame:
@@ -477,6 +351,21 @@ def fill_null_columns(df: pl.DataFrame, pred_col: str) -> pl.DataFrame:
     pl.DataFrame
         The DataFrame with null values replaced.
     """
+    n_null_pred = df[pred_col].null_count()
+    n_null_aa = df[Constants.aa_scores_column].null_count()
+    n_null_pep = df[Constants.pep_score_column].null_count()
+
+    if any(n > 0 for n in [n_null_pred, n_null_aa, n_null_pep]):
+        logging.debug(
+            "Filling nulls — %s: %d, %s: %d, %s: %d",
+            pred_col,
+            n_null_pred,
+            Constants.aa_scores_column,
+            n_null_aa,
+            Constants.pep_score_column,
+            n_null_pep,
+        )
+
     return df.with_columns(
         pl.col([pred_col, Constants.aa_scores_column]).fill_null("")
     ).with_columns(pl.col(Constants.pep_score_column).fill_null(-1.0))
@@ -514,19 +403,33 @@ def tokenize_and_parse_scores(
         The DataFrame with added token columns and the aa scores column
         converted from comma-separated strings to lists of floats.
     """
+    logging.info(
+        "Tokenizing sequences (replace_isoleucine_with_leucine=%s)",
+        replace_isoleucine_with_leucine,
+    )
+    logging.debug(
+        "Tokenizing ground truth column '%s'", Constants.ground_truth_sequence_column
+    )
     df = tokenize_sequences(
         df,
         seq_column=Constants.ground_truth_sequence_column,
         residues_path=residues_path,
         replace_isoleucine_with_leucine=replace_isoleucine_with_leucine,
     )
+
+    logging.debug("Tokenizing predicted column '%s'", pred_col)
     df = tokenize_sequences(
         df,
         seq_column=pred_col,
         residues_path=residues_path,
         replace_isoleucine_with_leucine=replace_isoleucine_with_leucine,
     )
-    aa_score_fun = lambda x: [float(c) for c in x.split(",")]
+
+    logging.debug(
+        "Parsing per-amino-acid score strings in column '%s'",
+        Constants.aa_scores_column,
+    )
+    aa_score_fun = lambda x: [] if x == "" else [float(c) for c in x.split(",")]
     return df.with_columns(
         pl.col(Constants.aa_scores_column).map_elements(
             aa_score_fun, return_dtype=pl.List(pl.Float64)
@@ -536,8 +439,7 @@ def tokenize_and_parse_scores(
 
 def align_and_explode(
     df: pl.DataFrame,
-    pred_col: str,
-    align_ignore_aa_scores: bool,
+    tie_break_suffix: bool,
 ) -> pl.DataFrame:
     """
     Align predicted and ground truth token sequences and explode to per-AA rows.
@@ -552,8 +454,6 @@ def align_and_explode(
     df : pl.DataFrame
         Input DataFrame with tokenized predicted and ground truth sequence
         columns and parsed per-amino-acid scores.
-    pred_col : str
-        Name of the predicted sequence column.
     align_ignore_aa_scores : bool
         If ``True``, alignment uses a constant match score of ``1.0`` rather
         than per-token values from the aa scores column.
@@ -564,21 +464,31 @@ def align_and_explode(
         A DataFrame exploded to one row per aligned amino acid position,
         with gap characters inserted where sequences do not align.
     """
+    logging.info(
+        "Aligning %d rows at amino acid level (tie_break_suffix=%s)",
+        len(df),
+        tie_break_suffix,
+    )
+
     row_iter = df.iter_rows(named=True)
-    row_iter = tqdm.tqdm(row_iter, desc="Aligning Amino Acids")
+    row_iter = tqdm.tqdm(row_iter, desc="Aligning Amino Acids", total=len(df))
     row_iter = map(
-        functools.partial(mutate_row_as_dict, pred_col, align_ignore_aa_scores),
+        functools.partial(mutate_row_as_dict, tie_break_suffix),
         row_iter,
     )
     df = pl.from_dicts(row_iter)
-    return df.explode(
+
+    logging.debug("Exploding aligned columns to per-amino-acid rows")
+    df = df.explode(
         [
-            pred_col,
-            Constants.ground_truth_sequence_column,
+            Constants.predicted_tokens,
+            Constants.ground_truth_tokens,
             Constants.aa_scores_column,
             Constants.aa_idx_column,
         ]
     )
+    logging.info("Exploded to %d per-amino-acid rows", len(df))
+    return df
 
 
 def get_prec_cov_df(
@@ -588,7 +498,7 @@ def get_prec_cov_df(
     residues_path: Optional[DfPath] = None,
     replace_isoleucine_with_leucine: bool = True,
     aa_level: bool = False,
-    align_ignore_aa_scores: bool = False,
+    align_tie_beak_suffix: bool = True,
     out_path: Optional[PathLike] = None,
 ) -> pl.DataFrame:
     """
@@ -645,19 +555,34 @@ def get_prec_cov_df(
         If ``ground_truth_df`` is ``None`` and either ``mgf_df`` or
         ``mztab_df`` is also ``None``.
     """
+    logging.info(
+        "Building precision-coverage DataFrame (aa_level=%s, align_tie_beak_suffix=%s)",
+        aa_level,
+        align_tie_beak_suffix,
+    )
+
     pc_df = load_ground_truth_df(ground_truth_df, mgf_df, mztab_df)
 
-    pred_col = get_pred_sequence_column(pc_df)
+    pred_col = Constants.get_pred_sequence_column(pc_df)
+    logging.debug("Using predicted sequence column '%s'", pred_col)
+
     pc_df = fill_null_columns(pc_df, pred_col)
     pc_df = tokenize_and_parse_scores(
         pc_df, pred_col, residues_path, replace_isoleucine_with_leucine
     )
 
     if aa_level:
-        pc_df = align_and_explode(pc_df, pred_col, align_ignore_aa_scores)
+        pc_df = align_and_explode(pc_df, align_tie_beak_suffix)
 
     score_col = Constants.aa_scores_column if aa_level else Constants.pep_score_column
+    logging.debug("Computing precision-coverage with score column '%s'", score_col)
     pc_df = calc_precision_coverage(pc_df, score_col)
+
+    logging.info(
+        "Precision-coverage DataFrame complete: %d rows, %d columns",
+        len(pc_df),
+        len(pc_df.columns),
+    )
 
     if out_path is not None:
         logging.info("Writing precision coverage DataFrame to %s", str(out_path))
@@ -717,11 +642,7 @@ def graph_prec_cov(*pc_df_paths: PathLike, out_path: Optional[PathLike] = None) 
 
 def main() -> None:
     """CLI entry"""
-    logging.basicConfig(
-        stream=sys.stdout,
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    configure_logging()
     fire.Fire({"get_pc_df": get_prec_cov_df, "graph_prec_cov": graph_prec_cov})
 
 

@@ -173,7 +173,7 @@ def tokenize_helper(
     """
     out = tokenizer.split(seq)
 
-    if out[0].startswith("[") and combine_n_term:
+    if len(out) > 1 and out[0].startswith("[") and combine_n_term:
         n_term_token = out[0]
         out = out[1:]
         out[0] = f"{n_term_token}{out[0]}"
@@ -233,11 +233,14 @@ def tokenize_sequences(
         seq, tokenizer, combine_n_term=combine_n_term
     )
 
-    data_df = data_df.with_columns(
-        pl.col(seq_column)
-        .map_elements(combine_fun, return_dtype=pl.List(pl.Utf8))
-        .alias(f"{out_prefix}_tokens")
-    ).with_columns(
+    tokens_iter = data_df.get_column(seq_column).to_list()
+    tokens_iter = tqdm.tqdm(tokens_iter, desc="Tokenizing Sequences")
+    tokens_iter = map(combine_fun, tokens_iter)
+    tokens_series = pl.Series(
+        f"{out_prefix}_tokens", tokens_iter, dtype=pl.List(pl.Utf8)
+    )
+
+    data_df = data_df.with_columns(tokens_series).with_columns(
         pl.col(f"{out_prefix}_tokens").len().alias(f"{out_prefix}_sequence_len")
     )
 
@@ -383,6 +386,28 @@ def get_ground_truth_df(
     return result_df
 
 
+def configure_logging(log_file: Optional[PathLike] = None) -> None:
+    """
+    Configure logging to stdout at INFO level, optionally also writing to a file.
+
+    Parameters
+    ----------
+    log_file : PathLike, optional
+        If provided, log output is written to this file in addition to stdout.
+        The file is opened in append mode. If ``None`` (default), only stdout
+        is used.
+    """
+    handlers = [logging.StreamHandler(sys.stdout)]
+    if log_file is not None:
+        handlers.append(logging.FileHandler(log_file))
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+    )
+
+
 def main() -> None:
     """
     Configure logging and expose data loading functions as a CLI.
@@ -403,12 +428,7 @@ def main() -> None:
         python module.py get_mztab path/to/file.mztab --out_path out.parquet
         python module.py get_groundtruth path/to/file.mgf path/to/file.mztab --out_path out.parquet
     """
-    logging.basicConfig(
-        stream=sys.stdout,
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
-
+    configure_logging()
     fire.Fire(
         {
             "get_mgf_psms": get_mgf_psms_df,
