@@ -153,7 +153,7 @@ def get_residues(residues_path: Optional[PathLike] = None) -> dict[str, float]:
     """
     if residues_path is None:
         residues_path = pathlib.Path(__file__).parent / "residues.yaml"
-    with open(residues_path) as f:
+    with open(residues_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
