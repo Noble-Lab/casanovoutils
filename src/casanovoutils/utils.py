@@ -31,26 +31,40 @@ PyteomicsSpectrum = dict[str, dict[str, Any] | list[Any]]
 DfPath = PathLike | pl.DataFrame
 
 
-def process_spectrum(spectrum: PyteomicsSpectrum) -> dict[str, dict[str, Any]]:
+def process_spectrum(
+    spectrum: PyteomicsSpectrum, meta_data_only: bool = True
+) -> dict[str, dict[str, Any]]:
     """
     Extract and augment parameter metadata from a single spectrum.
 
     Retrieves the ``params`` dict from a Pyteomics spectrum object and
-    annotates it with the number of peaks in the spectrum.
+    annotates it with the number of peaks in the spectrum. If ``meta_data_only``
+    is ``False``, the intensity and m/z arrays are also included in the output.
 
     Parameters
     ----------
     spectrum : PyteomicsSpectrum
         A spectrum dict as returned by ``pyteomics.mgf.read``, containing
-        at least a ``"params"`` key and an ``"m/z array"`` key.
+        at least a ``"params"`` key, an ``"m/z array"`` key, and an
+        ``"intensity array"`` key.
+    meta_data_only : bool, optional
+        If ``True``, only scalar metadata is returned (no spectral arrays).
+        If ``False``, ``"intensity_array"`` and ``"m_z_array"`` are added
+        to the output dict.
 
     Returns
     -------
-    dict[str, dict[str, Any]]
-        The spectrum's parameter dict with an added ``"n_peaks"`` entry.
+    dict[str, Any]
+        The spectrum's parameter dict with an added ``"n_peaks"`` entry, and
+        optionally ``"intensity_array"`` and ``"m_z_array"`` entries.
     """
     params = spectrum["params"]
     params["n_peaks"] = len(spectrum["m/z array"])
+
+    if not meta_data_only:
+        params["intensity_array"] = spectrum["intensity array"]
+        params["m_z_array"] = spectrum["m/z array"]
+
     return params
 
 
@@ -84,15 +98,17 @@ def write_dataframe(data_df: pl.DataFrame, out_path: PathLike) -> None:
 
 
 def get_mgf_psms_df(
-    mgf_path: DfPath, out_path: Optional[PathLike] = None
+    mgf_path: DfPath,
+    out_path: Optional[PathLike] = None,
+    meta_data_only: bool = True,
 ) -> pl.DataFrame:
     """
     Load PSM metadata from an MGF file into a Polars DataFrame.
 
-    If ``mgf_path`` is already a DataFrame, it is returned as-is.
-    Otherwise, the MGF file is parsed with Pyteomics, spectrum parameters
-    are extracted via :func:`process_spectrum`, and all columns are prefixed
-    with ``mgf_``.
+    If ``mgf_path`` is already a :class:`polars.DataFrame`, it is returned
+    as-is (and optionally written to ``out_path``). Otherwise, the MGF file
+    is parsed with Pyteomics, per-spectrum parameters are extracted via
+    :func:`process_spectrum`, and all columns are prefixed with ``mgf_``.
 
     Parameters
     ----------
@@ -100,13 +116,25 @@ def get_mgf_psms_df(
         Path to an MGF file, or an already-loaded :class:`polars.DataFrame`.
     out_path : PathLike, optional
         If provided, the resulting DataFrame is written to this path before
-        being returned. The format is inferred from the file extension.
+        being returned. The format is inferred from the file extension via
+        :func:`write_dataframe`.
+    meta_data_only : bool, optional
+        Passed through to :func:`process_spectrum`. If ``True`` (default),
+        only scalar spectrum metadata is loaded (no m/z or intensity arrays).
+        If ``False``, ``mgf_intensity_array`` and ``mgf_m_z_array`` columns
+        are included in the returned DataFrame.
 
     Returns
     -------
     pl.DataFrame
         A DataFrame with one row per spectrum and columns prefixed with
         ``mgf_``, including an ``mgf_n_peaks`` column.
+
+    Raises
+    ------
+    ValueError
+        Propagated from :func:`write_dataframe` if ``out_path`` has an
+        unsupported file extension.
     """
     if isinstance(mgf_path, pl.DataFrame):
         if out_path is not None:
@@ -119,7 +147,9 @@ def get_mgf_psms_df(
     logging.info("Reading MGF file %s", str(mgf_path))
     mgf_iter = pyteomics.mgf.read(str(mgf_path), use_index=False, convert_arrays=0)
     mgf_iter = tqdm.tqdm(mgf_iter, desc="reading params", unit="spectra")
-    mgf_iter = map(process_spectrum, mgf_iter)
+    mgf_iter = map(
+        lambda x: process_spectrum(x, meta_data_only=meta_data_only), mgf_iter
+    )
 
     spectrum_df = pl.from_dicts(mgf_iter)
     logging.info("Read %d spectra from %s", len(spectrum_df), str(mgf_path))
