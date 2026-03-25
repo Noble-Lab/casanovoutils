@@ -133,7 +133,9 @@ def get_mgf_psms_df(
     logging.info("Reading MGF file %s", str(mgf_path))
     mgf_iter = pyteomics.mgf.read(str(mgf_path), use_index=False, convert_arrays=0)
     mgf_iter = tqdm.tqdm(mgf_iter, desc="reading params", unit="spectra")
-    mgf_iter = map(lambda x: process_spectrum(x, meta_data_only), mgf_iter)
+    mgf_iter = map(
+        lambda x: process_spectrum(x, meta_data_only=meta_data_only), mgf_iter
+    )
 
     spectrum_df = pl.from_dicts(mgf_iter)
     logging.info("Read %d spectra from %s", len(spectrum_df), str(mgf_path))
