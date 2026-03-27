@@ -40,6 +40,22 @@ black src/ tests/
 isort src/ tests/
 ```
 
+## Pre-commit hooks
+
+The repository ships a [pre-commit](https://pre-commit.com/) configuration
+that runs black automatically on every commit. To install it:
+
+```bash
+uv run pre-commit install
+```
+
+After installation, black will run on any staged files each time you
+`git commit`. To run it manually across the whole codebase:
+
+```bash
+uv run pre-commit run --all-files
+```
+
 ## Submitting a pull request
 
 1. Fork the repository and create a feature branch from `main`.

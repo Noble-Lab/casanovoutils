@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "black>=25.11.0",
     "depthcharge-ms>=0.4.9",
     "fire>=0.7.1",
     "matplotlib>=3.10.7",
@@ -41,5 +42,6 @@ build-backend = "hatchling.build"
 dev = [
     "black>=25.11.0",
     "isort>=7.0.0",
+    "pre-commit>=4.5.1",
     "pytest>=9.0.2",
 ]

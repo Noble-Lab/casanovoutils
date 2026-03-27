@@ -427,11 +427,7 @@ def get_ground_truth_df(
         prefix = f"ms_run[{i + 1}]:index="
         index_exprs.append(
             pl.when(pl.col("mztab_spectra_ref").str.starts_with(prefix))
-            .then(
-                pl.col("mztab_spectra_ref")
-                .str.slice(len(prefix))
-                .cast(pl.Int64)
-            )
+            .then(pl.col("mztab_spectra_ref").str.slice(len(prefix)).cast(pl.Int64))
             .otherwise(pl.col("tmp_mgf_idx"))
             .alias("tmp_mgf_idx")
         )
