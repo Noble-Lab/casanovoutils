@@ -7,6 +7,7 @@ exposes them as a single ``casanovoutils`` CLI via ``fire``.
 
 import fire
 
+from .datasets import COMMANDS as dataset_commands
 from .denovoutils import COMMANDS as denovo_commands
 from .graphloss import COMMANDS as loss_commands
 from .mgfutils import COMMANDS as mgf_commands
@@ -18,6 +19,7 @@ COMMANDS: CommandDict = {
     "denovo": denovo_commands,
     "dump-residues": residue_commands,
     "graph-loss": loss_commands,
+    "datasets": dataset_commands,
 }
 
 

@@ -134,7 +134,7 @@ dev = [
 requires-dist = [
     { name = "depthcharge-ms", specifier = ">=0.4.9" },
     { name = "fire", specifier = ">=0.7.1" },
-    { name = "matplotlib", specifier = ">=3.10.7" },
+    { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "pandas", specifier = ">=2.3.3" },
