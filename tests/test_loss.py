@@ -1,330 +1,11 @@
-#!/usr/bin/env python3
-"""Plot Casanovo training and validation loss.
+import pytest
 
-This script reads one or more Casanovo training logs (either a log file or a
-`metrics.csv` file) and produces a PNG plot of training and validation loss as
-a function of step/iteration.
-
-Output is written to `<root>.png`.
-"""
-
-from __future__ import annotations
-
-import argparse
-import csv
-import math
-import re
-import sys
-from pathlib import Path
-from typing import Sequence, TypeAlias
-
-import matplotlib.pyplot as plt
-
-
-LossSeries: TypeAlias = list[tuple[int, float]]
-
-
-_FLOAT_RE_PART = r"-?(?:nan|inf|\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
-
-
-# Casanovo logs contain lines like:
-#   ... model._log_history : 50000\tnan\t0.365210
-# and a header line like:
-#   ... model._log_history : Step\tTrain loss\tValid loss
-_LOG_HISTORY_RE = re.compile(
-    rf"model\._log_history\s*:\s*(?P<step>\d+)\s+"
-    rf"(?P<train>{_FLOAT_RE_PART})\s+(?P<val>{_FLOAT_RE_PART})"
+from casanovoutils.loss import (
+    detect_input_format,
+    read_from_csvfile,
+    read_from_file,
+    read_from_logfile,
 )
-
-
-def read_from_logfile(input_path: Path) -> tuple[LossSeries, LossSeries]:
-    """Read train/validation loss series from a Casanovo log file.
-
-    Parameters
-    ----------
-    input_path
-        Path to a text log file produced during Casanovo training.
-
-    Returns
-    -------
-    (train_losses, val_losses)
-        Two lists of ``(step, loss)`` tuples.
-    """
-    train_losses: LossSeries = []
-    val_losses: LossSeries = []
-
-    with input_path.open("r", encoding="utf-8") as input_file:
-        for line in input_file:
-            match = _LOG_HISTORY_RE.search(line)
-            if match is None:
-                continue
-
-            step = int(match.group("step"))
-
-            train_loss = float(match.group("train"))
-            if not math.isnan(train_loss):
-                train_losses.append((step, train_loss))
-
-            val_loss = float(match.group("val"))
-            if not math.isnan(val_loss):
-                val_losses.append((step, val_loss))
-
-    if train_losses or val_losses:
-        print(
-            f"Read {len(train_losses)} train losses and {len(val_losses)} "
-            "validation losses.",
-            file=sys.stderr,
-        )
-
-    return train_losses, val_losses
-
-
-def read_from_csvfile(input_path: Path) -> tuple[LossSeries, LossSeries]:
-    """Read train/validation loss series from a Casanovo `metrics.csv` file.
-
-    Parameters
-    ----------
-    input_path
-        Path to a CSV file containing Casanovo metrics.
-
-    Returns
-    -------
-    (train_losses, val_losses)
-        Two lists of ``(step, loss)`` tuples.
-    """
-    train_losses: LossSeries = []
-    val_losses: LossSeries = []
-
-    required_fields = {"step", "train_CELoss", "valid_CELoss"}
-
-    with input_path.open("r", encoding="utf-8", newline="") as input_file:
-        reader = csv.DictReader(input_file)
-        if reader.fieldnames is None:
-            raise ValueError("CSV file is missing a header row.")
-
-        missing = required_fields.difference(reader.fieldnames)
-        if missing:
-            found = ", ".join(reader.fieldnames)
-            needed = ", ".join(sorted(required_fields))
-            missing_str = ", ".join(sorted(missing))
-            raise ValueError(
-                "CSV file is missing required column(s): "
-                f"{missing_str}. Required: {needed}. Found: {found}."
-            )
-
-        for row in reader:
-            if not row.get("step"):
-                continue
-            step = int(row["step"])
-
-            train_val = row.get("train_CELoss")
-            if train_val:
-                train_losses.append((step, float(train_val)))
-
-            valid_val = row.get("valid_CELoss")
-            if valid_val:
-                val_losses.append((step, float(valid_val)))
-
-    print(
-        f"Read {len(train_losses)} train losses and {len(val_losses)} "
-        "validation losses.",
-        file=sys.stderr,
-    )
-
-    return train_losses, val_losses
-
-
-def detect_input_format(input_path: Path) -> str:
-    """Determine whether the input is a log file or a metrics CSV.
-
-    The detection is based on filename conventions and a quick header sniff.
-
-    Parameters
-    ----------
-    input_path
-        Path to an input file.
-
-    Returns
-    -------
-    format
-        Either ``"csv"`` or ``"log"``.
-    """
-    if input_path.suffix.lower() == ".csv" or input_path.name == "metrics.csv":
-        return "csv"
-
-    # Sniff the first line: a metrics CSV should have a comma-delimited header
-    # containing a "step" column.
-    try:
-        with input_path.open("r", encoding="utf-8") as input_file:
-            first_line = input_file.readline()
-    except OSError:
-        # Let the caller surface a clearer error.
-        return "log"
-
-    if "," in first_line and "step" in first_line.split(","):
-        return "csv"
-
-    return "log"
-
-
-def existing_file(path_str: str) -> Path:
-    """Parse an existing file path for argparse.
-
-    Parameters
-    ----------
-    path_str
-        Path string provided by the user.
-
-    Returns
-    -------
-    path
-        A :class:`~pathlib.Path` that exists and is a file.
-    """
-    path = Path(path_str)
-    if not path.exists():
-        raise argparse.ArgumentTypeError(f"File not found: {path}")
-    if not path.is_file():
-        raise argparse.ArgumentTypeError(f"Not a file: {path}")
-    return path
-
-
-def read_from_file(input_path: Path) -> tuple[LossSeries, LossSeries]:
-    """Read losses from a Casanovo log file or metrics CSV."""
-    file_format = detect_input_format(input_path)
-    if file_format == "csv":
-        return read_from_csvfile(input_path)
-    return read_from_logfile(input_path)
-
-
-def plot_losses(
-    root: str,
-    train_loss_lists: Sequence[LossSeries],
-    val_loss_lists: Sequence[LossSeries],
-    max_y: float | None,
-) -> None:
-    """Create and save the loss plot.
-
-    Parameters
-    ----------
-    root
-        Output file root name. Output is written to ``{root}.png``.
-    train_loss_lists
-        A sequence of training loss series.
-    val_loss_lists
-        A sequence of validation loss series.
-    max_y
-        Optional y-axis maximum.
-    """
-    fig, ax = plt.subplots()
-
-    for i, train_loss_list in enumerate(train_loss_lists):
-        if not train_loss_list:
-            continue
-        label = "Training" if i == 0 else None
-        steps, losses = zip(*train_loss_list)
-        ax.plot(steps, losses, "-o", markersize=2, label=label)
-
-    for i, val_loss_list in enumerate(val_loss_lists):
-        if not val_loss_list:
-            continue
-        label = "Validation" if i == 0 else None
-        steps, losses = zip(*val_loss_list)
-        ax.plot(steps, losses, "-o", markersize=2, label=label)
-
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Loss")
-    ax.set_title(root)
-
-    if max_y is not None:
-        ax.set_ylim(0, max_y)
-
-    handles, labels = ax.get_legend_handles_labels()
-    if labels:
-        ax.legend(loc="upper right")
-
-    fig.set_figwidth(4)
-    fig.set_figheight(3)
-    fig.savefig(f"{root}.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        prog="plot-casanovo-loss.py",
-        description=(
-            "Read Casanovo log and/or metrics.csv files and plot training and "
-            "validation loss."
-        ),
-    )
-    parser.add_argument(
-        "root",
-        help="Output file root; plot will be written to <root>.png",
-    )
-    parser.add_argument(
-        "inputs",
-        nargs="+",
-        type=existing_file,
-        help="One or more input files (log files or metrics.csv files)",
-    )
-    parser.add_argument(
-        "--max-y",
-        type=float,
-        default=None,
-        help="Optional y-axis maximum",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the script."""
-    args = parse_args(sys.argv[1:] if argv is None else argv)
-
-    train_loss_lists: list[LossSeries] = []
-    val_loss_lists: list[LossSeries] = []
-    any_points = False
-
-    for input_path in args.inputs:
-        try:
-            train_loss_list, val_loss_list = read_from_file(input_path)
-        except (OSError, ValueError) as exc:
-            print(f"Error reading {input_path}: {exc}", file=sys.stderr)
-            return 2
-
-        if not train_loss_list and not val_loss_list:
-            print(
-                f"Warning: no loss entries found in {input_path}.",
-                file=sys.stderr,
-            )
-        else:
-            any_points = True
-
-        train_loss_lists.append(train_loss_list)
-        val_loss_lists.append(val_loss_list)
-
-    if not any_points:
-        print(
-            "Error: no loss entries found in any input file; nothing to plot.",
-            file=sys.stderr,
-        )
-        return 2
-
-    plot_losses(args.root, train_loss_lists, val_loss_lists, args.max_y)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-# -----------------------------------------------------------------------------
-# Embedded samples and pytest tests
-#
-# Run:
-#   pytest plot-casanovo-loss.py
-#
-# These tests write the embedded samples to a temporary directory so the
-# parsing code operates on real file paths.
-# code is exercised exactly as it is in real usage (paths, encoding, etc.).
 
 SAMPLE_CASA_BALANCED_LOG = """2026-01-17 08:50:26,334 INFO [casanovo/MainProcess] utils.log_system_info : ======= System Information =======
 2026-01-17 08:50:26,334 INFO [casanovo/MainProcess] utils.log_system_info : Executed Command: /net/noble/vol1/home/noble/miniconda3/envs/casanovo_dev/bin/casanovo train --model ../2026-01-14training4-extend/casa_balanced.epoch=12-step=668876.ckpt --config ../2026-01-09training4/casanovo.yaml --output_dir . --output_root casa_balanced --validation_peak_path /tmp/6478606.1.noble-long.q/massivekb_82c0124b_val_rndDedupSEQCHG_proforma_UniSpec_processed.mgf /tmp/6478606.1.noble-long.q/massivekb_82c0124b_train_rndDedupSEQCHG_proforma_UniSpec_processed.mgf
@@ -401,19 +82,19 @@ SAMPLE_CASA_BALANCED_LOG = """2026-01-17 08:50:26,334 INFO [casanovo/MainProcess
 2026-01-17 08:50:26,659 INFO [casanovo/MainProcess] casanovo.train : Using the following validation files:
 2026-01-17 08:50:26,659 INFO [casanovo/MainProcess] casanovo.train :   /tmp/6478606.1.noble-long.q/massivekb_82c0124b_val_rndDedupSEQCHG_proforma_UniSpec_processed.mgf
 2026-01-17 08:50:26,710 WARNING [casanovo/MainProcess] model_runner.initialize_tokenizer : Configured residue(s) not in model alphabet: C[Carbamidomethyl], M[Oxidation], [Acetyl]-, [Ammonia-loss]-
-2026-01-17 08:59:29,083 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 194 spectra with invalid information.Last error was: 
+2026-01-17 08:59:29,083 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 194 spectra with invalid information.Last error was:
  Insufficient number of peaks
-2026-01-17 08:59:29,083 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 194 spectra with invalid information.Last error was: 
+2026-01-17 08:59:29,083 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 194 spectra with invalid information.Last error was:
  Insufficient number of peaks
-2026-01-17 08:59:47,693 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 6 spectra with invalid information.Last error was: 
+2026-01-17 08:59:47,693 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 6 spectra with invalid information.Last error was:
  Insufficient number of peaks
-2026-01-17 08:59:47,693 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 6 spectra with invalid information.Last error was: 
+2026-01-17 08:59:47,693 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : UserWarning: Skipped 6 spectra with invalid information.Last error was:
  Insufficient number of peaks
 2026-01-17 08:59:49,451 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : /net/noble/vol1/home/noble/miniconda3/envs/casanovo_dev/lib/python3.11/site-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /net/noble/vol1/home/noble/proj/2026_ukeich_ms-casa-balanced/results/bill/2026-01-17training4-extend2 exists and is not empty.
 
 2026-01-17 08:59:49,451 WARNING [py.warnings/MainProcess] warnings._showwarnmsg : /net/noble/vol1/home/noble/miniconda3/envs/casanovo_dev/lib/python3.11/site-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /net/noble/vol1/home/noble/proj/2026_ukeich_ms-casa-balanced/results/bill/2026-01-17training4-extend2 exists and is not empty.
 
-2026-01-17 09:54:24,590 INFO [casanovo/MainProcess] model._log_history : Step	Train loss	Valid loss	
+2026-01-17 09:54:24,590 INFO [casanovo/MainProcess] model._log_history : Step	Train loss	Valid loss
 2026-01-17 09:54:24,590 INFO [casanovo/MainProcess] model._log_history : 50000	nan	0.365210
 2026-01-17 09:56:00,560 INFO [casanovo/MainProcess] model._log_history : 51452	0.382402	nan
 2026-01-17 10:49:10,152 INFO [casanovo/MainProcess] model._log_history : 100000	nan	0.453382
@@ -538,8 +219,7 @@ SAMPLE_METRICS_CSV = """epoch,hp/optimizer_cosine_schedule_period_iters,hp/optim
 """
 
 
-def _write_sample(tmp_path: Path, filename: str, content: str) -> Path:
-    """Write an embedded sample to a temporary file and return its path."""
+def _write_sample(tmp_path, filename, content):
     path = tmp_path / filename
     path.write_text(content, encoding="utf-8")
     return path
@@ -553,19 +233,13 @@ def test_detect_input_format_csv(tmp_path) -> None:
 
 def test_detect_input_format_log(tmp_path) -> None:
     """Log inputs should be detected as logs."""
-    log_path = _write_sample(
-        tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG
-    )
+    log_path = _write_sample(tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG)
     assert detect_input_format(log_path) == "log"
 
 
 def test_read_from_logfile_parses_expected_points(tmp_path) -> None:
     """The logfile parser should extract train/val series from log_history."""
-    import pytest  # type: ignore
-
-    log_path = _write_sample(
-        tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG
-    )
+    log_path = _write_sample(tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG)
     train, val = read_from_logfile(log_path)
 
     assert len(train) == 29
@@ -580,8 +254,6 @@ def test_read_from_logfile_parses_expected_points(tmp_path) -> None:
 
 def test_read_from_csvfile_parses_expected_points(tmp_path) -> None:
     """The CSV parser should read the same series as the original metrics.csv."""
-    import pytest  # type: ignore
-
     metrics_path = _write_sample(tmp_path, "metrics.csv", SAMPLE_METRICS_CSV)
     train, val = read_from_csvfile(metrics_path)
 
@@ -598,9 +270,7 @@ def test_read_from_csvfile_parses_expected_points(tmp_path) -> None:
 def test_read_from_file_dispatches_by_format(tmp_path) -> None:
     """read_from_file should call the appropriate reader based on detection."""
     metrics_path = _write_sample(tmp_path, "metrics.csv", SAMPLE_METRICS_CSV)
-    log_path = _write_sample(
-        tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG
-    )
+    log_path = _write_sample(tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG)
 
     train_csv, val_csv = read_from_file(metrics_path)
     train_log, val_log = read_from_file(log_path)
