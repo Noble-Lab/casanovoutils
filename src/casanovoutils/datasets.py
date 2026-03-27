@@ -3,7 +3,6 @@
 import logging
 import pathlib
 import random
-import sys
 from os import PathLike
 from typing import Optional
 
@@ -11,6 +10,8 @@ import fire
 import pyteomics.mgf
 import tqdm
 
+from . import configure_logging
+from .types import CommandDict
 
 # Number of spectra to buffer per output file before flushing to disk.
 _WRITE_BUFFER_SIZE = 1000
@@ -18,7 +19,6 @@ _WRITE_BUFFER_SIZE = 1000
 
 def _collect_peptide_counts(
     mgf_files: tuple[PathLike, ...],
-    logger: logging.Logger,
 ) -> tuple[dict[str, int], int]:
     """Pass 1: stream all input MGF files and count spectra per peptide.
 
@@ -26,8 +26,6 @@ def _collect_peptide_counts(
     ----------
     mgf_files : tuple of PathLike
         Paths to the input annotated MGF files.
-    logger : logging.Logger
-        Logger for progress messages.
 
     Returns
     -------
@@ -57,11 +55,11 @@ def _collect_peptide_counts(
                 ) from exc
             pep_counts[seq] = pep_counts.get(seq, 0) + 1
             file_count += 1
-        logger.info(f"Read {file_count} spectra from {mgf_file}.")
+        logging.info(f"Read {file_count} spectra from {mgf_file}.")
         total_spectra += file_count
 
-    logger.info(f"Total spectra read: {total_spectra}")
-    logger.info(f"Unique peptides: {len(pep_counts)}")
+    logging.info(f"Total spectra read: {total_spectra}")
+    logging.info(f"Unique peptides: {len(pep_counts)}")
     return pep_counts, total_spectra
 
 
@@ -70,7 +68,6 @@ def _assign_splits(
     total_spectra: int,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     spectra_per_peptide: Optional[int],
-    logger: logging.Logger,
 ) -> tuple[dict[str, str], dict[str, set[int]], dict[str, set[str]]]:
     """Compute per-peptide split assignments and sampling indices.
 
@@ -86,8 +83,6 @@ def _assign_splits(
         Paths to existing train/val/test MGF files, or None.
     spectra_per_peptide : int or None
         Maximum spectra to retain per peptide, or None.
-    logger : logging.Logger
-        Logger for progress messages.
 
     Returns
     -------
@@ -114,7 +109,7 @@ def _assign_splits(
             else:
                 spectra_after += count
         eliminated = total_spectra - spectra_after
-        logger.info(
+        logging.info(
             f"Spectra eliminated by spectra_per_peptide="
             f"{spectra_per_peptide}: {eliminated}"
         )
@@ -133,9 +128,7 @@ def _assign_splits(
                 f"(train, validation, test), but {len(existing_splits)} "
                 f"were provided."
             )
-        for split_name, split_path in zip(
-            split_names, existing_splits, strict=True
-        ):
+        for split_name, split_path in zip(split_names, existing_splits, strict=True):
             for spectrum in tqdm.tqdm(
                 pyteomics.mgf.read(str(split_path), use_index=False),
                 desc=f"Reading existing {split_name}",
@@ -150,7 +143,7 @@ def _assign_splits(
                         f"'{split_path}'"
                     ) from exc
                 existing_peps[split_name].add(seq)
-            logger.info(
+            logging.info(
                 f"Existing {split_name}: "
                 f"{len(existing_peps[split_name])} peptide"
                 f"{'s' if len(existing_peps[split_name]) != 1 else ''}"
@@ -165,11 +158,7 @@ def _assign_splits(
             shared = existing_peps[name_a] & existing_peps[name_b]
             if shared:
                 examples = sorted(shared)[:5]
-                suffix = (
-                    f" (and {len(shared) - 5} more)"
-                    if len(shared) > 5
-                    else ""
-                )
+                suffix = f" (and {len(shared) - 5} more)" if len(shared) > 5 else ""
                 raise ValueError(
                     f"Peptide(s) found in multiple existing splits "
                     f"({name_a}, {name_b}): "
@@ -177,14 +166,10 @@ def _assign_splits(
                 )
 
         all_existing = (
-            existing_peps["train"]
-            | existing_peps["val"]
-            | existing_peps["test"]
+            existing_peps["train"] | existing_peps["val"] | existing_peps["test"]
         )
         overlapping = all_existing & set(pep_counts.keys())
-        logger.info(
-            f"Peptides overlapping with existing splits: {len(overlapping)}"
-        )
+        logging.info(f"Peptides overlapping with existing splits: {len(overlapping)}")
 
     # Partition peptides into pre-assigned and new.
     pre_assigned: dict[str, list[str]] = {
@@ -224,7 +209,7 @@ def _assign_splits(
             target_test = max(1, round(total_peptides * 0.1))
             target_train = total_peptides - target_val - target_test
         else:
-            logger.warning(
+            logging.warning(
                 f"Fewer than 3 peptides available across existing and "
                 f"new data ({total_peptides} peptides). One or more of "
                 f"the train/validation/test splits may be empty."
@@ -250,18 +235,14 @@ def _assign_splits(
         else:
             # Not enough; distribute proportionally.
             if total_needed > 0:
-                train_new = new_peptides[
-                    : round(available * need_train / total_needed)
-                ]
+                train_new = new_peptides[: round(available * need_train / total_needed)]
                 remaining = new_peptides[len(train_new) :]
                 adjusted_need_val = need_val
                 adjusted_need_test = need_test
                 adjusted_total = adjusted_need_val + adjusted_need_test
                 if adjusted_total > 0:
                     val_count = round(
-                        len(remaining)
-                        * adjusted_need_val
-                        / adjusted_total
+                        len(remaining) * adjusted_need_val / adjusted_total
                     )
                 else:
                     val_count = 0
@@ -279,7 +260,7 @@ def _assign_splits(
         # No existing splits: original behavior.
         n = len(new_peptides)
         if n < 3:
-            logger.warning(
+            logging.warning(
                 f"Only {n} unique peptides available; assigning all to "
                 f"training set and leaving validation/test splits empty."
             )
@@ -315,7 +296,6 @@ def _write_splits(
     spectra_per_peptide: Optional[int],
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     combine_with_existing: bool,
-    logger: logging.Logger,
 ) -> tuple[dict[str, int], dict[str, set[str]]]:
     """Pass 2: stream spectra to output MGF files.
 
@@ -335,8 +315,6 @@ def _write_splits(
         Paths to existing split files, required when combine_with_existing.
     combine_with_existing : bool
         If True, prepend existing split spectra to each output file.
-    logger : logging.Logger
-        Logger for progress messages.
 
     Returns
     -------
@@ -351,8 +329,7 @@ def _write_splits(
     }
 
     outfiles = {
-        split: f"{output_root}.{split}.mgf"
-        for split in ("train", "val", "test")
+        split: f"{output_root}.{split}.mgf" for split in ("train", "val", "test")
     }
 
     split_spectra_counts: dict[str, int] = {
@@ -510,90 +487,51 @@ def create_datasets(
                 f"Use --overwrite to overwrite."
             )
 
-    logger = logging.getLogger("create_datasets")
-    logger.propagate = False
-    stream_handler = None
-    file_handler = None
-    try:
-        logger.setLevel(logging.INFO)
-        # Close and remove any pre-existing handlers to avoid leaking resources.
-        for handler in list(logger.handlers):
-            try:
-                handler.close()
-            finally:
-                logger.removeHandler(handler)
+    configure_logging(pathlib.Path(f"{output_root}.log"))
 
-        formatter = logging.Formatter("%(message)s")
+    random.seed(random_seed)
 
-        stream_handler = logging.StreamHandler(stream=sys.stdout)
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
+    pep_counts, total_spectra = _collect_peptide_counts(mgf_files)
 
-        file_handler = logging.FileHandler(f"{output_root}.log", mode="w")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    except Exception:
-        # Clean up any handlers that were added before the failure.
-        for handler in list(logger.handlers):
-            try:
-                handler.close()
-            finally:
-                logger.removeHandler(handler)
-        raise
+    pep_to_split, sampled_indices, existing_peps = _assign_splits(
+        pep_counts,
+        total_spectra,
+        existing_splits,
+        spectra_per_peptide,
+    )
 
-    try:
-        random.seed(random_seed)
+    split_spectra_counts, split_pep_sets = _write_splits(
+        mgf_files,
+        output_root,
+        pep_to_split,
+        sampled_indices,
+        spectra_per_peptide,
+        existing_splits,
+        combine_with_existing,
+    )
 
-        pep_counts, total_spectra = _collect_peptide_counts(mgf_files, logger)
+    # Log split summaries.
+    for split_name in ("train", "val", "test"):
+        peps = split_pep_sets[split_name]
+        count = split_spectra_counts[split_name]
+        if combine_with_existing:
+            new_pep_count = len(peps - existing_peps[split_name])
+            total_peps = len(peps | existing_peps[split_name])
+            logging.info(
+                f"{split_name}: {count} spectra, "
+                f"{new_pep_count} new peptides, "
+                f"{total_peps} total peptides"
+            )
+        else:
+            logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
 
-        pep_to_split, sampled_indices, existing_peps = _assign_splits(
-            pep_counts,
-            total_spectra,
-            existing_splits,
-            spectra_per_peptide,
-            logger,
-        )
 
-        split_spectra_counts, split_pep_sets = _write_splits(
-            mgf_files,
-            output_root,
-            pep_to_split,
-            sampled_indices,
-            spectra_per_peptide,
-            existing_splits,
-            combine_with_existing,
-            logger,
-        )
-
-        # Log split summaries.
-        for split_name in ("train", "val", "test"):
-            peps = split_pep_sets[split_name]
-            count = split_spectra_counts[split_name]
-            if combine_with_existing:
-                new_pep_count = len(peps - existing_peps[split_name])
-                total_peps = len(peps | existing_peps[split_name])
-                logger.info(
-                    f"{split_name}: {count} spectra, "
-                    f"{new_pep_count} new peptides, "
-                    f"{total_peps} total peptides"
-                )
-            else:
-                logger.info(
-                    f"{split_name}: {count} spectra, "
-                    f"{len(peps)} peptides"
-                )
-    finally:
-        if file_handler is not None:
-            file_handler.close()
-            logger.removeHandler(file_handler)
-        if stream_handler is not None:
-            stream_handler.close()
-            logger.removeHandler(stream_handler)
+COMMANDS: CommandDict = {"create-splits": create_datasets}
 
 
 def main() -> None:
     """CLI entry point for create-datasets."""
-    fire.Fire(create_datasets)
+    fire.Fire(COMMANDS)
 
 
 if __name__ == "__main__":

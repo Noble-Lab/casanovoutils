@@ -4,7 +4,7 @@ import numpy as np
 import pyteomics.mgf
 import pytest
 
-from casanovoutils.create_datasets import create_datasets
+from casanovoutils.datasets import create_datasets
 
 
 def _write_mgf(path, spectra):
