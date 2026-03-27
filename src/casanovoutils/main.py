@@ -8,7 +8,7 @@ exposes them as a single ``casanovoutils`` CLI via ``fire``.
 import fire
 
 from .denovoutils import COMMANDS as denovo_commands
-from .loss import COMMANDS as loss_commands
+from .graphloss import COMMANDS as loss_commands
 from .mgfutils import COMMANDS as mgf_commands
 from .residues import COMMANDS as residue_commands
 from .types import CommandDict
@@ -17,7 +17,7 @@ COMMANDS: CommandDict = {
     "mgf": mgf_commands,
     "denovo": denovo_commands,
     "dump-residues": residue_commands,
-    "loss": loss_commands,
+    "graph-loss": loss_commands,
 }
 
 
