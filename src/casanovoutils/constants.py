@@ -1,3 +1,7 @@
+"""
+Shared constants for column names and sentinel values used across the package.
+"""
+
 import polars as pl
 
 

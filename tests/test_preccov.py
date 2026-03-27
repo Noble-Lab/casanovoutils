@@ -3,7 +3,7 @@ import polars.testing
 import pytest
 
 from casanovoutils.constants import Constants
-from casanovoutils.prec_cov import (
+from casanovoutils.preccov import (
     align_tokens_with_gaps,
     calc_precision_coverage,
     fill_null_columns,

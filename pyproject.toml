@@ -22,15 +22,8 @@ dependencies = [
 ]
 
 [project.scripts]
-casanovo-utils = "casanovoutils:main"
-mgf-utils = "casanovoutils.mgfutils:main"
-downsample-ms = "casanovoutils.downsample:main"
-graph-prec-cov = "casanovoutils.preccov:main"
-charge-distribution = "casanovoutils.summarize_mgf:charge_distribution_main"
-fragment-coverage = "casanovoutils.summarize_mgf:fragment_coverage_main"
-peak-counts = "casanovoutils.summarize_mgf:peak_counts_main"
-peptide-lengths = "casanovoutils.summarize_mgf:peptide_lengths_main"
-summarize-mgf = "casanovoutils.summarize_mgf:summarize_mgf_main"
+casanovoutils = "casanovoutils.main:main"
+
 
 [project.optional-dependencies]
 docs = [

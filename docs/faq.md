@@ -48,16 +48,7 @@ uv pip install casanovoutils
 
 **Are isoleucine (I) and leucine (L) treated as the same amino acid?**
 
-By default, yes. The `add-peptides` method of `graph-prec-cov` sets
-`--replace_i_l True` by default, so I and L in ground-truth sequences are
-replaced with L before comparing to predictions. To disable this and require
-an exact match, pass `--noreplace_i_l`:
-
-```bash
-graph-prec-cov \
-  add-peptides results.mztab truth.mgf "Strict" --noreplace_i_l \
-  save strict.png
-```
+By default, yes. Pass `--noreplace_i_l` to require an exact match.
 
 **What happens to spectra that are missing from the mzTab output?**
 
@@ -78,13 +69,12 @@ before using casanovoutils.
 
 ## MGF operations
 
-**Can I combine multiple MGF files before downsampling?**
+**What does `pipeline` do compared to running stages individually?**
 
-Yes. `mgf-utils` accepts multiple input files and streams them together:
-
-```bash
-mgf-utils file1.mgf file2.mgf downsample --k 3 write --outfile out.mgf
-```
+`casanovoutils mgf pipeline` chains shuffle → downsample → purge-redundant
+in a single pass, writing one output file. Each stage is skipped when its
+parameter is omitted. Running the stages individually via separate commands
+produces identical results but requires intermediate files.
 
 **What does downsampling do to peptides with fewer than `k` spectra?**
 
@@ -95,6 +85,13 @@ peptide has *more* than `k` spectra; otherwise the full set is retained.
 
 Yes, set `--random_seed` to a fixed integer. The default seed is `42`.
 
+**What does `purge-redundant` do exactly?**
+
+Peaks within each spectrum are sorted by m/z. Any peak whose m/z differs from
+the preceding peak by less than `epsilon` (default `0.001` Da) is discarded.
+This removes near-duplicate peaks that can arise from instrument noise or
+rounding.
+
 ---
 
 ## Residue mass tables
@@ -102,11 +99,11 @@ Yes, set `--random_seed` to a fixed integer. The default seed is `42`.
 **What is the default residue mass table?**
 
 The bundled `residues.yaml` file contains standard monoisotopic masses for the
-20 canonical amino acids plus common modifications used by Casanovo. You can
-export it with:
+20 canonical amino acids plus common modifications used by Casanovo. Export it
+with:
 
 ```bash
-casanovo-utils dump-residues residues.yaml
+casanovoutils dump-residues dump residues.yaml
 ```
 
 **How do I add a custom modification?**
@@ -116,7 +113,6 @@ Export the default table, add your modification as a new key–value pair
 `--residues_path`:
 
 ```bash
-casanovo-utils dump-residues my_residues.yaml
+casanovoutils dump-residues dump my_residues.yaml
 # edit my_residues.yaml ...
-graph-prec-cov --residues_path my_residues.yaml ...
 ```
