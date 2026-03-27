@@ -10,7 +10,7 @@ MIN_PEP_SCORE = -1.0
 
 def get_ground_truth(
     mztab_path: PathLike | pd.DataFrame, mgf_path: list[PathLike] | PathLike, replace_i_l: bool = False
-) -> tuple[tuple[np.ndarray, bool], np.ndarray, np.ndarray]:
+) -> pd.DataFrame:
     """
     Align MzTab PSM predictions to MGF-provided ground-truth sequences.
 
@@ -45,10 +45,11 @@ def get_ground_truth(
 
         Any additional columns present in the PSM table are also propagated
         into the output DataFrame.
-    mgf_path : list[Pathlike] or PathLike
+    mgf_path : PathLike or list of PathLike
         Path to an MGF file (or list of multiple MGF paths) containing ground-truth peptide sequences encoded as
         ``SEQ=<PEPTIDE>`` lines. Each such line defines one spectrum entry in
-        order of appearance.
+        order of appearance. When multiple paths are provided, spectra are
+        concatenated and aligned to ``ms_run[1]``, ``ms_run[2]``, etc. respectively
     replace_i_l : bool, default=False
         If True, treat isoleucine (I) and leucine (L) as equivalent by replacing
         ``"I"`` with ``"L"`` in the ground-truth sequences prior to computing
@@ -81,7 +82,7 @@ def get_ground_truth(
         psm_df = mztab_path
 
     ground_truth = []
-    if isinstance(mgf_path, str): 
+    if not isinstance(mgf_path, (list, tuple)):
         mgf_path = [mgf_path]
 
     for path in mgf_path:
@@ -100,6 +101,11 @@ def get_ground_truth(
         spectra_idx = (
             psm_df[run_mask]["spectra_ref"].str[len(f"ms_run[{i + 1}]:index="):].apply(int).to_numpy()
         )
+        max_idx = len(ground_truth[i]) - 1
+        if spectra_idx.size > 0 and spectra_idx.max() > max_idx:
+            raise ValueError(
+                f"ms_run[{i + 1}] references index {spectra_idx.max()} but MGF has only {len(ground_truth[i])} spectra"
+            )
         overall_spectra_idx.append(spectra_idx)
 
     predictions_df = pd.DataFrame({"ground_truth": [item for gt in ground_truth for item in gt]})
