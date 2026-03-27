@@ -28,9 +28,8 @@ import tqdm
 
 from . import configure_logging
 from .residues import get_residues
-from .types import CommandDict
+from .types import CommandDict, PyteomicsSpectrum
 
-PyteomicsSpectrum = dict[str, dict[str, Any] | list[Any]]
 DfPath = PathLike | pl.DataFrame
 
 

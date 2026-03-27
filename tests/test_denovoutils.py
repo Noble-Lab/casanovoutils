@@ -255,3 +255,80 @@ def test_get_mgf_psms_df_columns_have_mgf_prefix(tmp_path):
 
     result = get_mgf_psms_df(mgf_path)
     assert all(c.startswith("mgf_") for c in result.columns)
+
+
+# --- get_ground_truth_df: list[DfPath] support ---
+
+
+@pytest.fixture
+def mgf_df1():
+    return pl.DataFrame(
+        {
+            "mgf_title": ["spec1", "spec2"],
+            "mgf_n_peaks": [10, 20],
+        }
+    )
+
+
+@pytest.fixture
+def mgf_df2():
+    return pl.DataFrame(
+        {
+            "mgf_title": ["spec3"],
+            "mgf_n_peaks": [30],
+        }
+    )
+
+
+def test_get_ground_truth_df_list_single_element_matches_scalar(mgf_df, mztab_df):
+    """A single-element list should produce the same result as passing the df directly."""
+    result_list = get_ground_truth_df([mgf_df], mztab_df)
+    result_scalar = get_ground_truth_df(mgf_df, mztab_df)
+    polars.testing.assert_frame_equal(result_list, result_scalar)
+
+
+def test_get_ground_truth_df_list_multiple_mgfs_row_count(mgf_df1, mgf_df2, mztab_df):
+    """Row count equals total rows across all MGF DataFrames."""
+    # mztab_df has 3 spectra_ref entries covering ms_run[1] indices 0-2;
+    # after concat, mgf_df1 occupies indices 0-1 and mgf_df2 occupies index 2.
+    result = get_ground_truth_df([mgf_df1, mgf_df2], mztab_df)
+    assert len(result) == len(mgf_df1) + len(mgf_df2)
+
+
+def test_get_ground_truth_df_list_multiple_mgfs_has_expected_columns(
+    mgf_df1, mgf_df2, mztab_df
+):
+    result = get_ground_truth_df([mgf_df1, mgf_df2], mztab_df)
+    assert "mgf_title" in result.columns
+    assert "mztab_sequence" in result.columns
+
+
+def test_get_ground_truth_df_list_multiple_mgfs_no_tmp_columns(
+    mgf_df1, mgf_df2, mztab_df
+):
+    result = get_ground_truth_df([mgf_df1, mgf_df2], mztab_df)
+    assert not any(c.startswith("tmp_") for c in result.columns)
+
+
+def test_get_ground_truth_df_list_run2_joins_second_file(mgf_df1, mgf_df2):
+    """ms_run[2]:index=N uses the global concat index, so N=2 maps to mgf_df2's first row."""
+    mztab = pl.DataFrame(
+        {
+            "mztab_spectra_ref": [
+                "ms_run[1]:index=0",
+                "ms_run[1]:index=1",
+                "ms_run[2]:index=2",
+            ],
+            "mztab_sequence": ["PEPTIDE", "ANOTHER", "THIRD"],
+        }
+    )
+    result = get_ground_truth_df([mgf_df1, mgf_df2], mztab)
+    # The row whose title is "spec3" (from mgf_df2) should be joined with "THIRD"
+    row = result.filter(pl.col("mgf_title") == "spec3")
+    assert row["mztab_sequence"][0] == "THIRD"
+
+
+def test_get_ground_truth_df_list_writes_output(tmp_path, mgf_df1, mgf_df2, mztab_df):
+    out_path = tmp_path / "out.parquet"
+    get_ground_truth_df([mgf_df1, mgf_df2], mztab_df, out_path=out_path)
+    assert out_path.exists()
