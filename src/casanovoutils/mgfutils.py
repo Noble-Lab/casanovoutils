@@ -1,83 +1,341 @@
+"""
+Utilities for reading, writing, and processing MGF spectrum files.
+
+Provides functions to iterate over spectra from MGF files or in-memory
+dicts, downsample by peptide, shuffle, and purge near-duplicate peaks.
+A ``pipeline`` function chains these stages, and a ``main`` entry point
+exposes them all as CLI subcommands via ``fire``.
+"""
+
+import itertools
+import logging
+import os
+import pathlib
 import random
 from os import PathLike
-from typing import Iterable
+from typing import Iterable, Optional
 
 import fire
+import numpy as np
 import pyteomics.mgf
 import tqdm
 
-from . import PyteomicsSpectrum
-from .downsample import downsample_spectra
+from . import configure_logging
+from .types import CommandDict, PyteomicsSpectrum
+
+SpectraInput = PathLike | Iterable[PathLike] | Iterable[PyteomicsSpectrum]
 
 
-class MgfUtils:
+def iter_spectra(
+    spectra: SpectraInput,
+    desc: Optional[str] = None,
+) -> Iterable[PyteomicsSpectrum]:
     """
-    Utilities for working with one or more MGF files.
+    Normalize various spectrum input types to an iterable of PyteomicsSpectrum.
 
     Parameters
     ----------
-    *mgf_files : Iterable[PathLike]
-        One or more paths to MGF files. These are streamed using
-        ``pyteomics.mgf.chain``.
-    random_seed : int, default=42
-        Seed used for reproducible shuffling/sampling.
-    """
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        One of:
+        - A single path to an MGF file.
+        - An iterable of paths to MGF files.
+        - An iterable of Pyteomics spectrum dictionaries.
+    desc : str, optional
+        Description for the tqdm progress bar. If ``None``, no progress bar
+        is shown.
 
-    def __init__(self, *mgf_files: Iterable[PathLike], random_seed: int = 42) -> None:
-        random.seed(random_seed)
-        self.spectra: Iterable[PyteomicsSpectrum] = pyteomics.mgf.chain(
-            *mgf_files, use_index=False
+    Yields
+    ------
+    PyteomicsSpectrum
+        Spectrum dictionaries, one at a time.
+    """
+    if isinstance(spectra, (str, os.PathLike)):
+        raw = pyteomics.mgf.read(spectra, use_index=False)
+    else:
+        it = iter(spectra)
+        try:
+            first = next(it)
+        except StopIteration:
+            return
+        if isinstance(first, (str, os.PathLike)):
+            raw = (
+                s
+                for path in itertools.chain([first], it)
+                for s in pyteomics.mgf.read(path, use_index=False)
+            )
+        else:
+            raw = itertools.chain([first], it)
+
+    if desc is not None:
+        raw = tqdm.tqdm(raw, desc=desc, unit="psm")
+
+    yield from raw
+
+
+def get_pep_dict_mgf(spectra: SpectraInput) -> dict[str, list[PyteomicsSpectrum]]:
+    """
+    Read spectra and group them by peptide sequence.
+
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+
+    Returns
+    -------
+    dict[str, list[PyteomicsSpectrum]]
+        A dictionary mapping peptide sequence strings (taken from
+        ``spectrum["params"]["seq"]``) to a list of Pyteomics spectrum
+        dictionaries corresponding to that sequence.
+    """
+    out = {}
+    for curr in iter_spectra(spectra, desc="Reading mgf file"):
+        seq = curr["params"]["seq"]
+        if seq not in out:
+            out[seq] = []
+        out[seq].append(curr)
+    return out
+
+
+def write_spectra(
+    spectra: Iterable[PyteomicsSpectrum], outfile: Optional[PathLike]
+) -> None:
+    """
+    Write spectra to an MGF file, if an output path is provided.
+
+    Parameters
+    ----------
+    spectra : Iterable[PyteomicsSpectrum]
+        Spectra to write.
+    outfile : PathLike, optional
+        Destination MGF file path. If ``None``, this function is a no-op.
+    """
+    if outfile is None:
+        return
+
+    out_iter = tqdm.tqdm(spectra, desc=f"Writing {outfile}", unit="psm")
+    pyteomics.mgf.write(out_iter, output=str(outfile))
+
+
+def downsample(
+    spectra: SpectraInput,
+    k: int = 1,
+    outfile: Optional[PathLike] = None,
+    random_seed: int = 42,
+) -> list[PyteomicsSpectrum]:
+    """
+    Downsample spectra by limiting the number of PSMs per peptide sequence.
+
+    Spectra are grouped by peptide sequence, then up to ``k`` spectra are
+    randomly sampled for each unique peptide. If ``outfile`` is provided, the
+    result is also written to disk in MGF format.
+
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+    k : int, default=1
+        Maximum number of spectra (PSMs) to retain per unique peptide sequence.
+    outfile : PathLike, optional
+        If provided, write the downsampled spectra to this MGF file path.
+    random_seed : int, default=42
+        Random seed for reproducible sampling.
+
+    Returns
+    -------
+    list[PyteomicsSpectrum]
+        Downsampled spectra; each peptide sequence appears at most ``k`` times.
+    """
+    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
+
+    logging.info("Downsampling to k=%d per peptide (random_seed=%d)", k, random_seed)
+    random.seed(random_seed)
+
+    pep_dict = get_pep_dict_mgf(spectra)
+    n_before = sum(len(v) for v in pep_dict.values())
+    for pep, psms in tqdm.tqdm(
+        pep_dict.items(), desc="Sampling peptides", unit="peptide"
+    ):
+        pep_dict[pep] = random.sample(psms, min(len(psms), k))
+
+    result = list(itertools.chain.from_iterable(pep_dict.values()))
+    logging.info("Downsampled %d -> %d spectra", n_before, len(result))
+    write_spectra(result, outfile)
+    return result
+
+
+def purge_redundant(
+    spectra: SpectraInput,
+    epsilon: float = 0.001,
+    outfile: Optional[PathLike] = None,
+) -> list[PyteomicsSpectrum]:
+    """
+    Remove peaks with near-duplicate m/z values from each spectrum.
+
+    For each spectrum, peaks are sorted by m/z and any peak whose m/z differs
+    from the previous peak by less than ``epsilon`` is discarded. If
+    ``outfile`` is provided, the result is also written to disk in MGF format.
+
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+    epsilon : float, default=0.001
+        Minimum m/z separation (in daltons) required to keep a peak.
+    outfile : PathLike, optional
+        If provided, write the purged spectra to this MGF file path.
+
+    Returns
+    -------
+    list[PyteomicsSpectrum]
+        Spectra with redundant peaks removed and peaks sorted by m/z.
+    """
+    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
+
+    logging.info("Purging redundant peaks with epsilon=%g Da", epsilon)
+    result = []
+    peaks_before = 0
+    peaks_after = 0
+    for spectrum in iter_spectra(spectra, desc="Purging redundant peaks"):
+        mz = spectrum["m/z array"]
+        intensity = spectrum["intensity array"]
+
+        sort_idx = np.argsort(mz)
+        mz = mz[sort_idx]
+        intensity = intensity[sort_idx]
+
+        mask = np.concatenate(([True], np.diff(mz) >= epsilon))
+        peaks_before += len(mz)
+        peaks_after += mask.sum()
+
+        result.append(
+            {
+                **spectrum,
+                "m/z array": mz[mask],
+                "intensity array": intensity[mask],
+            }
         )
 
-    def shuffle(self) -> None:
-        """
-        Shuffle spectra in memory.
+    logging.info(
+        "Purged %d -> %d peaks across %d spectra",
+        peaks_before,
+        peaks_after,
+        len(result),
+    )
+    write_spectra(result, outfile)
+    return result
 
-        This method consumes the current ``self.spectra`` iterable, loads all
-        spectra into a list, shuffles them in-place, and replaces
-        ``self.spectra`` with the shuffled list.
-        """
-        spectra_iter = tqdm.tqdm(self.spectra, unit="PSM", desc="Reading Spectra")
-        spectra_iter = list(spectra_iter)
-        spectra_iter = random.shuffle(spectra_iter)
-        self.spectra = spectra_iter
 
-    def downsample(self, k: int = 1) -> None:
-        """
-        Downsample spectra by peptide sequence.
+def shuffle(
+    spectra: SpectraInput,
+    outfile: Optional[PathLike] = None,
+    random_seed: int = 42,
+) -> list[PyteomicsSpectrum]:
+    """
+    Read all spectra and return them in a shuffled order.
 
-        Delegates to :func:`downsample_spectra`, which groups spectra by peptide
-        sequence (typically ``spectrum["params"]["seq"]``) and retains up to
-        ``k`` spectra per unique peptide.
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+    outfile : PathLike, optional
+        If provided, write the shuffled spectra to this MGF file path.
+    random_seed : int, default=42
+        Random seed for reproducible shuffling.
 
-        Parameters
-        ----------
-        k : int, default=1
-            Maximum number of spectra to retain per peptide sequence.
+    Returns
+    -------
+    list[PyteomicsSpectrum]
+        All spectra in shuffled order.
+    """
+    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
 
-        Notes
-        -----
-        - Depending on the implementation of :func:`downsample_spectra`, this
-          may require grouping all spectra and can be memory-intensive.
-        """
-        self.spectra = downsample_spectra(self.spectra, k, False, None)
+    logging.info("Shuffling spectra (random_seed=%d)", random_seed)
+    random.seed(random_seed)
 
-    def write(self, outfile: PathLike = "out.mgf") -> None:
-        """
-        Write current spectra to an MGF file.
+    result = list(iter_spectra(spectra, desc="Reading spectra"))
+    random.shuffle(result)
+    logging.info("Shuffled %d spectra", len(result))
+    write_spectra(result, outfile)
+    return result
 
-        Parameters
-        ----------
-        outfile : PathLike, default="out.mgf"
-            Output file path for the written MGF.
-        """
-        spectra_iter = tqdm.tqdm(self.spectra, unit="PSM", desc="Writing Spectra")
-        pyteomics.mgf.write(spectra=spectra_iter, output=outfile)
+
+def pipeline(
+    spectra: SpectraInput,
+    outfile: Optional[PathLike] = None,
+    do_shuffle: bool = True,
+    downsample_k: Optional[int] = None,
+    purge_epsilon: Optional[float] = None,
+    random_seed: int = 42,
+) -> list[PyteomicsSpectrum]:
+    """
+    Run spectra through an optional chain of processing stages.
+
+    Stages are applied in order: shuffle → downsample → purge redundant peaks.
+    Each stage is skipped when its enabling parameter is ``None`` (or
+    ``False`` for ``do_shuffle``).
+
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+    outfile : PathLike, optional
+        If provided, write the final spectra to this MGF file path.
+    do_shuffle : bool, default=True
+        Whether to shuffle the spectra.
+    downsample_k : int, optional
+        If provided, downsample to at most this many PSMs per peptide sequence.
+    purge_epsilon : float, optional
+        If provided, remove peaks whose m/z differs from the previous peak by
+        less than this value (in daltons).
+    random_seed : int, default=42
+        Random seed passed to shuffle and downsample.
+
+    Returns
+    -------
+    list[PyteomicsSpectrum]
+        Processed spectra.
+    """
+    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
+
+    stages = []
+    if do_shuffle:
+        stages.append("shuffle")
+    if downsample_k is not None:
+        stages.append(f"downsample(k={downsample_k})")
+    if purge_epsilon is not None:
+        stages.append(f"purge-redundant(epsilon={purge_epsilon})")
+    logging.info(
+        "Running pipeline stages: %s", " -> ".join(stages) if stages else "none"
+    )
+
+    result: SpectraInput = spectra
+
+    if do_shuffle:
+        result = shuffle(result, random_seed=random_seed)
+
+    if downsample_k is not None:
+        result = downsample(result, k=downsample_k, random_seed=random_seed)
+
+    if purge_epsilon is not None:
+        result = purge_redundant(result, epsilon=purge_epsilon)
+    else:
+        result = list(iter_spectra(result))
+
+    write_spectra(result, outfile)
+    return result
+
+
+COMMANDS: CommandDict = {
+    "pipeline": pipeline,
+    "shuffle": shuffle,
+    "downsample": downsample,
+    "purge-redundant": purge_redundant,
+}
 
 
 def main() -> None:
-    """CLI Entry"""
-    fire.Fire(MgfUtils)
+    fire.Fire(COMMANDS)
 
 
 if __name__ == "__main__":
