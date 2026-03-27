@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 from . import configure_logging
 from .types import CommandDict
 
-
 LossSeries: TypeAlias = list[tuple[int, float]]
 
 
