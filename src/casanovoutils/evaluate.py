@@ -87,7 +87,7 @@ def get_ground_truth(
 
     for path in mgf_path:
         gt = []
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             for line in tqdm.tqdm(f, desc=f"Reading mgf file: {path}", unit="lines"):
                 if line.startswith("SEQ="):
                     gt.append(line.removeprefix("SEQ=").strip())
@@ -127,7 +127,7 @@ def get_ground_truth(
             predictions_df[col] = None
 
         col_idx = predictions_df.columns.get_loc(col)
-        for i, (spectra_idx, run_mask) in enumerate(zip(overall_spectra_idx, overall_run_masks)): 
+        for i, (spectra_idx, run_mask) in enumerate(zip(overall_spectra_idx, overall_run_masks, strict=True)): 
             global_idx = spectra_idx + offsets[i] 
             predictions_df.iloc[global_idx, col_idx] = psm_df[run_mask][col].values
 
