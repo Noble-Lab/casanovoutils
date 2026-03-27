@@ -1,6 +1,6 @@
 import pytest
 
-from casanovoutils.loss import (
+from casanovoutils.graphloss import (
     detect_input_format,
     read_from_csvfile,
     read_from_file,
