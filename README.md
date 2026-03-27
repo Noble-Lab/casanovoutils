@@ -1,131 +1,151 @@
 # casanovoutils
 
-Utility CLI tools for **evaluating, visualizing, and manipulating peptide-spectrum match (PSM) data**, designed to work cleanly with **Casanovo**, **mzTab**, and **MGF** files.
+Utility tools for **evaluating, visualizing, and manipulating peptide-spectrum
+match (PSM) data**, designed to work cleanly with
+[Casanovo](https://casanovo.readthedocs.io/), **mzTab**, and **MGF** files.
 
-This package provides:
+## Features
 
-* Precision–coverage (Prec–Cov) curve plotting with AUPC
-* Amino-acid–level and peptide-level evaluation
-* MGF downsampling by peptide
-* Residue mass table utilities
+- **MGF processing pipeline** — shuffle, downsample by peptide sequence, and
+  purge near-duplicate peaks, individually or chained in a single command
+- **PSM data loading** — parse MGF and mzTab files into Polars DataFrames and
+  join them into a ground-truth table
+- **Precision–coverage evaluation** — compute and plot Prec–Cov curves with
+  AUPC at the peptide and amino-acid level
+- **Residue mass tables** — export and customize the amino acid mass vocabulary
+  used for evaluation
 
-All functionality is exposed via a **Fire-based CLI** entrypoint.
-
-## CLI Overview
-
-```bash
-casanovoutils <command> [options]
-```
-
-Available commands:
-
-* `graph-prec-cov` — plot precision–coverage curves
-* `downsample-ms` — downsample MGF files by peptide
-* `dump-residues` — export the default residue mass table
-
-You can inspect help for any command via:
+## Installation
 
 ```bash
-casanovoutils <command> --help
+pip install casanovoutils
 ```
 
-## Precision–Coverage Plotting (`graph-prec-cov`)
+Requires Python 3.13 or later.
 
-Plot and compare **precision–coverage curves** for peptide or amino-acid–level predictions, with **AUPC** reported directly in the legend.
+## Quick start
 
-### Key features
+### Process an MGF file
 
-* Supports **mzTab** + optional **MGF** ground truth
-* Peptide-level or amino-acid–level evaluation
-* Multiple datasets on a single plot
-* Uses Casanovo’s `aa_match_batch` evaluator internally
-
-### Basic example (peptide-level)
+Shuffle, downsample to at most 2 spectra per peptide, and remove near-duplicate
+peaks in one pass:
 
 ```bash
-casanovoutils graph-prec-cov \
-  add-peptides \
-    --mztab_path results.mztab \
-    --name Casanovo \
-    --ground_truth_col true_sequence \
-  save prec_cov.png
+casanovoutils mgf pipeline input.mgf \
+  --outfile out.mgf \
+  --downsample_k 2 \
+  --purge_epsilon 0.001
 ```
 
-### Multiple datasets in one figure
+Run a single stage:
 
 ```bash
-casanovoutils graph-prec-cov \
-  --fig_width 6 \
-  --fig_height 4 \
-  --legend_location upper right \
-  add-peptides \
-    --mztab_path modelA.mztab \
-    --name ModelA \
-    --ground_truth_col peptide \
-  add-peptides \
-    --mztab_path modelB.mztab \
-    --name ModelB \
-    --ground_truth_mgf truth.mgf \
-  save comparison.png
+casanovoutils mgf shuffle input.mgf --outfile shuffled.mgf
+casanovoutils mgf downsample input.mgf --outfile sampled.mgf --k 3
+casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
 ```
 
-Because this is a **single Fire object**, state is preserved across chained calls.
+### Load PSM data
 
-### Amino-acid–level precision–coverage
-
-If your mzTab contains per-AA scores (e.g. Casanovo output):
+Join MGF metadata with mzTab predictions into a single DataFrame:
 
 ```bash
-casanovoutils graph-prec-cov \
-  add-amino-acids \
-    --mztab_path results.mztab \
-    --name Casanovo-AA \
-    --scores_col opt_ms_run[1]_aa_scores \
-    --ground_truth_col peptide \
-  save aa_prec_cov.png
+casanovoutils denovo get_groundtruth input.mgf results.mztab \
+  --out_path groundtruth.parquet
 ```
 
-## MGF Downsampling (`downsample-ms`)
-
-Downsample one or more MGF files by **sampling up to *k* spectra per peptide**.
-
-Useful for:
-
-* Dataset balancing
-* Reducing redundancy
-* Faster benchmarking
-
-### Example
+Load either source individually:
 
 ```bash
-casanovoutils downsample-ms \
-  input1.mgf input2.mgf \
-  --outfile sampled.mgf \
-  --k 2
+casanovoutils denovo get_mgf_psms input.mgf --out_path psms.parquet
+casanovoutils denovo get_mztab results.mztab --out_path matches.parquet
 ```
 
-Options:
-
-* `--k` — max PSMs per peptide
-* `--shuffle` — shuffle output spectra (default: true)
-* `--random_seed` — reproducible sampling
-
-## Residue Mass Tables
-
-### Dump the default residue table
+### Export the residue mass table
 
 ```bash
-casanovoutils dump-residues residues.yaml
+casanovoutils dump-residues dump residues.yaml
 ```
 
-You can edit this YAML file and pass it back into plotting commands:
+Edit `residues.yaml` to add custom modifications or non-standard residues,
+then pass it back to other tools via `--residues_path`.
+
+## CLI reference
+
+All commands live under the single `casanovoutils` entry point:
+
+```text
+casanovoutils
+├── mgf
+│   ├── pipeline        shuffle → downsample → purge-redundant in one pass
+│   ├── shuffle         randomise spectrum order
+│   ├── downsample      limit spectra per peptide sequence
+│   └── purge-redundant remove near-duplicate peaks by m/z
+├── denovo
+│   ├── get_mgf_psms    load MGF metadata into a DataFrame
+│   ├── get_mztab       load mzTab PSMs into a DataFrame
+│   └── get_groundtruth join MGF + mzTab into a ground-truth table
+└── dump-residues
+    └── dump            copy the default residue mass YAML to a path
+```
+
+Pass `--help` to any subcommand for full argument details:
 
 ```bash
---residues_path custom_residues.yaml
+casanovoutils mgf pipeline --help
+casanovoutils denovo get_groundtruth --help
 ```
 
-This is useful for:
+### `casanovoutils mgf pipeline`
 
-* Custom modifications
-* Non-standard residues
-* Mass tweaks for experimental work
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `spectra` | path | required | Input MGF file |
+| `--outfile` | path | `None` | Output MGF file |
+| `--do_shuffle` | bool | `True` | Shuffle spectra |
+| `--downsample_k` | int | `None` | Max spectra per peptide (skipped if omitted) |
+| `--purge_epsilon` | float | `None` | Min m/z gap in Da to keep a peak (skipped if omitted) |
+| `--random_seed` | int | `42` | Seed for shuffle and downsample |
+
+### `casanovoutils mgf downsample`
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `spectra` | path | required | Input MGF file |
+| `--k` | int | `1` | Max spectra per peptide sequence |
+| `--outfile` | path | `None` | Output MGF file |
+| `--random_seed` | int | `42` | Random seed |
+
+### `casanovoutils mgf purge-redundant`
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `spectra` | path | required | Input MGF file |
+| `--epsilon` | float | `0.001` | Min m/z separation in Da |
+| `--outfile` | path | `None` | Output MGF file |
+
+### `casanovoutils denovo get_groundtruth`
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_path` | path | required | Input MGF file |
+| `mztab_path` | path | required | Input mzTab file |
+| `--out_path` | path | `None` | Output path (`.parquet`, `.csv`, `.tsv`) |
+
+## Logging
+
+All processing commands write log messages to stdout. If `--outfile` is
+provided, a `.log` file is written alongside it with the same base name:
+
+```text
+out.mgf   → out.log
+```
+
+## Development
+
+```bash
+git clone https://github.com/Noble-Lab/casanovoutils.git
+cd casanovoutils
+uv sync
+pytest
+```

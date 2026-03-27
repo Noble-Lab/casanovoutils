@@ -1,104 +1,39 @@
-import pathlib
-import shutil
+"""
+casanovoutils — utilities for working with de novo peptide sequencing data.
+
+Provides MGF file processing, precision/coverage evaluation, sequence
+alignment, and residue mass vocabulary management. Exposes
+``configure_logging`` for consistent log setup across submodules.
+"""
+
+import logging
+import sys
 from os import PathLike
-from typing import Any, Optional
-
-import fire
-import pyteomics.mgf
-import tqdm
-import yaml
-
-PyteomicsSpectrum = list[dict[str, Any]]
+from typing import Optional
 
 
-def get_pep_dict_mgf(
-    mgf_file: PathLike | pyteomics.mgf.MGF,
-) -> dict[str, PyteomicsSpectrum]:
+def configure_logging(log_file: Optional[PathLike] = None) -> None:
     """
-    Read spectra from an MGF file  and group them by peptide sequence.
+    Configure logging to stdout, optionally also writing to a file.
 
-    This function iterates through all spectra in an MGF source and builds a
-    dictionary mapping each peptide sequence to the list of spectra (PSMs)
-    annotated with that sequence.
+    This function is a no-op if it's already been called.
 
     Parameters
     ----------
-    mgf_file : PathLike or pyteomics.mgf.MGFBase
-        Either:
-        - A filesystem path to an MGF file, which will be opened using
-          ``pyteomics.mgf.read(..., use_index=False)``, or
-        - An existing Pyteomics MGF reader/iterator (e.g., ``MGF`` or
-          ``IndexedMGF``), in which case it is used directly.
-
-    Returns
-    -------
-    dict[str, list[PyteomicsSpectrum]]
-        A dictionary mapping peptide sequence strings (taken from
-        ``spectrum["params"]["seq"]``) to a list of Pyteomics spectrum
-        dictionaries corresponding to that sequence. Each value in the list is
-        one spectrum/PSM entry as yielded by Pyteomics.
+    log_file : PathLike, optional
+        If provided, log output is written to this file in addition to stdout.
+        The file is opened in append mode. If ``None`` (default), only stdout
+        is used.
     """
-    if not isinstance(mgf_file, pyteomics.mgf.MGFBase):
-        mgf_iter = pyteomics.mgf.read(mgf_file, use_index=False)
+    if logging.root.handlers:
+        return
 
-    mgf_iter = tqdm.tqdm(mgf_iter, desc=f"Reading mgf file", unit="psm")
-    out = {}
-    for curr in mgf_iter:
-        seq = curr["params"]["seq"]
-        if curr["params"]["seq"] not in out:
-            out[seq] = []
-        out[seq].append(curr)
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_file is not None:
+        handlers.append(logging.FileHandler(log_file))
 
-    return out
-
-
-def get_residues(residues_path: Optional[PathLike] = None) -> dict[str, float]:
-    """
-    Load a mapping of amino acid residue names to masses from a YAML file.
-
-    If ``residues_path`` is not provided, the function loads a default
-    ``residues.yaml`` file located in the same directory as this module.
-
-    Parameters
-    ----------
-    residues_path : PathLike, optional
-        Path to a YAML file containing residue mass information.
-        If ``None`` (default), the bundled ``residues.yaml`` file is used.
-
-    Returns
-    -------
-    dict[str, float]
-        A dictionary mapping residue identifiers (typically one-letter or
-        multi-character amino acid codes) to their corresponding masses.
-    """
-    if residues_path is None:
-        residues_path = pathlib.Path(__file__).parent / "residues.yaml"
-    with open(residues_path) as f:
-        return yaml.safe_load(f)
-
-
-def dump_residues(destination_path: PathLike) -> None:
-    """
-    Copy the default ``residues.yaml`` file included with this package to a
-    specified destination.
-
-    Parameters
-    ----------
-    destination_path : PathLike
-        Path to copy the YAML file to. May be a directory or a file path.
-
-    Returns
-    -------
-    None
-    """
-    residues_path = pathlib.Path(__file__).parent / "residues.yaml"
-    shutil.copy(residues_path, destination_path)
-
-
-def main() -> None:
-    """CLI Entry"""
-    fire.Fire(
-        {
-            "dump-residues": dump_residues,
-        }
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=handlers,
     )

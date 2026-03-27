@@ -10,6 +10,8 @@ author = "The Noble Lab"
 extensions = [
     "myst_parser",
     "autoapi.extension",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
 ]
 
 # sphinx-autoapi configuration

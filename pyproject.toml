@@ -21,10 +21,8 @@ dependencies = [
 ]
 
 [project.scripts]
-casanovo-utils = "casanovoutils:main"
-mgf-utils = "casanovoutils.mgfutils:main"
-downsample-ms = "casanovoutils.downsample:main"
-graph-prec-cov = "casanovoutils.preccov:main"
+casanovoutils = "casanovoutils.main:main"
+
 
 [project.optional-dependencies]
 docs = [

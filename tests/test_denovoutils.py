@@ -3,7 +3,7 @@ import polars.testing
 import pytest
 
 from casanovoutils.constants import Constants
-from casanovoutils.utils import (
+from casanovoutils.denovoutils import (
     get_ground_truth_df,
     get_mgf_psms_df,
     get_mztab_df,

@@ -8,19 +8,16 @@ state-of-the-art de novo peptide sequencing tool, and works directly with
 
 ## Key capabilities
 
-- **Precision–Coverage plotting** — visualize and compare de novo sequencing
-  accuracy across models or conditions using precision–coverage (Prec–Cov)
-  curves with area-under-curve (AUPC) values reported in the legend.
+- **MGF processing pipeline** — shuffle, downsample by peptide sequence, and
+  purge near-duplicate peaks, either as individual steps or chained together
+  via the `casanovoutils mgf pipeline` command.
 
-- **MGF downsampling** — balance datasets by limiting the number of spectra
-  retained per peptide sequence, with optional shuffling and reproducible
-  random seeds.
+- **PSM data loading** — parse MGF and mzTab files into Polars DataFrames,
+  join predicted and ground-truth annotations, and export to Parquet, CSV,
+  or TSV via `casanovoutils denovo`.
 
-- **MGF utilities** — merge, downsample, and write MGF files from the command
-  line using a chainable interface.
-
-- **Residue mass tables** — export and customize the amino acid mass table used
-  for evaluation.
+- **Residue mass tables** — export and customize the amino acid mass table
+  used for evaluation via `casanovoutils dump-residues dump`.
 
 ```{toctree}
 :maxdepth: 2
@@ -34,9 +31,22 @@ faq
 
 ```{toctree}
 :maxdepth: 1
+:caption: API Reference
+
+api/mgfutils
+api/denovoutils
+api/align
+api/preccov
+api/residues
+api/constants
+api/types
+api/main
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Reference
 
-autoapi/index
 CHANGELOG
 ```
 

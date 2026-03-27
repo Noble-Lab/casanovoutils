@@ -32,66 +32,50 @@ uv sync
 
 ## Verifying the installation
 
-After installation, the following commands should be available in your shell:
+After installation, the `casanovoutils` command should be available in your
+shell:
 
 ```bash
-graph-prec-cov --help
-downsample-ms --help
-mgf-utils --help
-casanovo-utils --help
+casanovoutils --help
+casanovoutils mgf --help
+casanovoutils denovo --help
 ```
 
 ## Quick start examples
 
-### Plot a precision–coverage curve
+### Shuffle and downsample an MGF file
 
-Given a Casanovo mzTab output file and the MGF file that was used as input,
-plot a precision–coverage curve:
+Shuffle spectra and retain at most 2 per peptide sequence:
 
 ```bash
-graph-prec-cov \
-  add-peptides results.mztab ground_truth.mgf "My Model" \
-  save prec_cov.png
+casanovoutils mgf pipeline input.mgf --outfile out.mgf --downsample_k 2
 ```
 
-The AUPC (area under the precision–coverage curve) is printed in the legend
-automatically.
-
-### Compare two models on one plot
+### Downsample only (no shuffle)
 
 ```bash
-graph-prec-cov \
-  --fig_width 6 \
-  --fig_height 4 \
-  add-peptides modelA.mztab truth.mgf "Model A" \
-  add-peptides modelB.mztab truth.mgf "Model B" \
-  save comparison.png
+casanovoutils mgf downsample input.mgf --outfile sampled.mgf --k 2
 ```
 
-### Downsample an MGF file
+### Remove near-duplicate peaks
 
-Retain at most 2 spectra per peptide sequence and write the result to a new
-MGF file:
+Remove peaks separated by less than 0.001 Da:
 
 ```bash
-downsample-ms input.mgf --outfile sampled.mgf --k 2
+casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
 ```
 
-### Chain MGF operations
-
-Use `mgf-utils` to downsample and write multiple input MGF files in one
-command:
+### Load PSM data into a DataFrame
 
 ```bash
-mgf-utils file1.mgf file2.mgf \
-  downsample --k 5 \
-  write --outfile combined_downsampled.mgf
+casanovoutils denovo get_groundtruth input.mgf results.mztab \
+  --out_path groundtruth.parquet
 ```
 
 ### Export the residue mass table
 
 ```bash
-casanovo-utils dump-residues residues.yaml
+casanovoutils dump-residues dump residues.yaml
 ```
 
 Edit `residues.yaml` to add custom modifications or non-standard residues,

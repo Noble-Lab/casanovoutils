@@ -14,18 +14,21 @@ The module is also executable as a CLI via ``python -m casanovoutils.utils``
 
 import logging
 import pathlib
-import sys
 from os import PathLike
 from typing import Any, Optional
 
 import depthcharge.tokenizers
 import fire
+import numpy as np
 import polars as pl
 import polars.selectors as cs
 import pyteomics.mgf
 import pyteomics.mztab
 import tqdm
-import yaml
+
+from . import configure_logging
+from .residues import get_residues
+from .types import CommandDict
 
 PyteomicsSpectrum = dict[str, dict[str, Any] | list[Any]]
 DfPath = PathLike | pl.DataFrame
@@ -66,6 +69,43 @@ def process_spectrum(
         params["m_z_array"] = spectrum["m/z array"]
 
     return params
+
+
+def purge_redundant(
+    spectrum: PyteomicsSpectrum,
+    eps: float = np.finfo(np.float32).eps,
+) -> PyteomicsSpectrum:
+    """
+    Remove redundant peaks that are too close together along the m/z axis.
+
+    Peaks are sorted by m/z. Any peak within ``eps`` of the preceding peak
+    is discarded, keeping the first peak in each run of close peaks.
+
+    Parameters
+    ----------
+    spectrum : PyteomicsSpectrum
+        A spectrum dict as returned by ``pyteomics.mgf.read``, containing
+        ``"m/z array"`` and ``"intensity array"`` keys.
+    eps : float, optional
+        Maximum m/z distance between two peaks to be considered redundant.
+        Defaults to the 32-bit float machine epsilon
+        (``numpy.finfo(numpy.float32).eps`` ≈ 1.19e-7).
+
+    Returns
+    -------
+    PyteomicsSpectrum
+        A new spectrum dict with ``"m/z array"`` and ``"intensity array"``
+        replaced by the deduplicated arrays. All other keys are unchanged.
+    """
+    mz = np.asarray(spectrum["m/z array"])
+    intensity = np.asarray(spectrum["intensity array"])
+
+    order = np.argsort(mz)
+    mz = mz[order]
+    intensity = intensity[order]
+
+    keep = np.concatenate([[True], np.diff(mz) >= eps])
+    return {**spectrum, "m/z array": mz[keep], "intensity array": intensity[keep]}
 
 
 def write_dataframe(data_df: pl.DataFrame, out_path: PathLike) -> None:
@@ -160,31 +200,6 @@ def get_mgf_psms_df(
         write_dataframe(spectrum_df, out_path)
 
     return spectrum_df
-
-
-def get_residues(residues_path: Optional[PathLike] = None) -> dict[str, float]:
-    """
-    Load a mapping of amino acid residue names to masses from a YAML file.
-
-    If ``residues_path`` is not provided, the function loads a default
-    ``residues.yaml`` file located in the same directory as this module.
-
-    Parameters
-    ----------
-    residues_path : PathLike, optional
-        Path to a YAML file containing residue mass information.
-        If ``None`` (default), the bundled ``residues.yaml`` file is used.
-
-    Returns
-    -------
-    dict[str, float]
-        A dictionary mapping residue identifiers (typically one-letter or
-        multi-character amino acid codes) to their corresponding masses.
-    """
-    if residues_path is None:
-        residues_path = pathlib.Path(__file__).parent / "residues.yaml"
-    with open(residues_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def tokenize_helper(
@@ -430,26 +445,11 @@ def get_ground_truth_df(
     return result_df
 
 
-def configure_logging(log_file: Optional[PathLike] = None) -> None:
-    """
-    Configure logging to stdout at INFO level, optionally also writing to a file.
-
-    Parameters
-    ----------
-    log_file : PathLike, optional
-        If provided, log output is written to this file in addition to stdout.
-        The file is opened in append mode. If ``None`` (default), only stdout
-        is used.
-    """
-    handlers = [logging.StreamHandler(sys.stdout)]
-    if log_file is not None:
-        handlers.append(logging.FileHandler(log_file))
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        handlers=handlers,
-    )
+COMMANDS: CommandDict = {
+    "get_mgf_psms": get_mgf_psms_df,
+    "get_mztab": get_mztab_df,
+    "get_groundtruth": get_ground_truth_df,
+}
 
 
 def main() -> None:
@@ -473,13 +473,7 @@ def main() -> None:
         python module.py get_groundtruth path/to/file.mgf path/to/file.mztab --out_path out.parquet
     """
     configure_logging()
-    fire.Fire(
-        {
-            "get_mgf_psms": get_mgf_psms_df,
-            "get_mztab": get_mztab_df,
-            "get_groundtruth": get_ground_truth_df,
-        }
-    )
+    fire.Fire(COMMANDS)
 
 
 if __name__ == "__main__":
