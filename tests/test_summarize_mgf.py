@@ -13,7 +13,6 @@ from casanovoutils.summarize_mgf import (
     summarize_mgf,
 )
 
-
 # ---------------------------------------------------------------------------
 # count_charge_states tests (pure function)
 # ---------------------------------------------------------------------------
@@ -197,7 +196,7 @@ def test_count_peaks_empty():
 def test_measure_peptide_lengths_basic():
     """Known sequences return correct lengths."""
     spectra = [
-        _make_spectrum(2, 5, seq="AGK"),      # 3 residues
+        _make_spectrum(2, 5, seq="AGK"),  # 3 residues
         _make_spectrum(2, 5, seq="PEPTIDE"),  # 7 residues
     ]
     lengths, n_skipped = measure_peptide_lengths(spectra)
@@ -385,8 +384,12 @@ def test_summarize_mgf_integration(tmp_path):
     assert "data:image/png;base64," not in content
 
     # PNG and TSV files exist
-    for stem in ("charge_distribution", "peak_counts", "peptide_lengths",
-                 "fragment_coverage"):
+    for stem in (
+        "charge_distribution",
+        "peak_counts",
+        "peptide_lengths",
+        "fragment_coverage",
+    ):
         assert (out_dir / f"{stem}.png").exists()
         assert (out_dir / f"{stem}.tsv").exists()
 

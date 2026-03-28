@@ -53,14 +53,18 @@ from os import PathLike
 from typing import Iterable
 
 import fire
+
 # isort: off
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 # isort: on
 import numpy as np
 
 from .denovoutils import get_mgf_psms_df, process_spectrum
+
 try:
     from lark.exceptions import LarkError
     from pyteomics import mgf, proforma as pyteomics_proforma
@@ -334,9 +338,7 @@ def peak_counts(
     # -- Histogram ------------------------------------------------------------
     if counts_map:
         arr = np.array(df["mgf_n_peaks"].to_list())
-        title = (
-            f"Peaks per spectrum (n={total:,}, median={int(np.median(arr))})"
-        )
+        title = f"Peaks per spectrum (n={total:,}, median={int(np.median(arr))})"
         fig = _make_histogram_fig(
             arr,
             xlabel="Number of peaks",
@@ -436,6 +438,7 @@ def peptide_lengths(
 
 _CHUNK_SIZE = 500
 
+
 def _annotate_chunk(args):
     """Annotate a chunk of spectra for fragment coverage.
 
@@ -485,8 +488,7 @@ def _annotate_chunk(args):
 
         n_peaks = len(obs_mz)
         n_matched = sum(
-            1 for ann in spectrum.annotation
-            if len(ann.fragment_annotations) > 0
+            1 for ann in spectrum.annotation if len(ann.fragment_annotations) > 0
         )
         matched_intensity = sum(
             spectrum.intensity[i]
@@ -494,7 +496,9 @@ def _annotate_chunk(args):
             if len(ann.fragment_annotations) > 0
         )
         total_intensity = spectrum.intensity.sum()
-        prop = float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+        prop = (
+            float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+        )
         results.append(("ok", scan, filename, seq, charge, n_peaks, n_matched, prop))
     return results
 
@@ -556,7 +560,9 @@ def _compute_coverage_results(
                 continue
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
-                pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
+                pepmass_raw[0]
+                if isinstance(pepmass_raw, (list, tuple))
+                else pepmass_raw
             )
 
             if not seq:
@@ -597,8 +603,7 @@ def _compute_coverage_results(
 
             n_peaks = len(obs_int)
             n_matched = sum(
-                1 for ann in spectrum.annotation
-                if len(ann.fragment_annotations) > 0
+                1 for ann in spectrum.annotation if len(ann.fragment_annotations) > 0
             )
             matched_intensity = sum(
                 spectrum.intensity[i]
@@ -606,7 +611,11 @@ def _compute_coverage_results(
                 if len(ann.fragment_annotations) > 0
             )
             total_intensity = spectrum.intensity.sum()
-            prop = float(matched_intensity / total_intensity) if total_intensity > 0 else 0.0
+            prop = (
+                float(matched_intensity / total_intensity)
+                if total_intensity > 0
+                else 0.0
+            )
             results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
 
         return results, n_skipped
@@ -638,7 +647,9 @@ def _compute_coverage_results(
                 continue
             pepmass_raw = params.get("pepmass", (0.0,))
             precursor_mz = float(
-                pepmass_raw[0] if isinstance(pepmass_raw, (list, tuple)) else pepmass_raw
+                pepmass_raw[0]
+                if isinstance(pepmass_raw, (list, tuple))
+                else pepmass_raw
             )
             obs_mz = spectrum_data["m/z array"]
             obs_int = spectrum_data["intensity array"]
@@ -666,7 +677,9 @@ def _compute_coverage_results(
             for item in future.result():
                 if item[0] == "ok":
                     _, scan, filename, seq, charge, n_peaks, n_matched, prop = item
-                    results.append((scan, filename, seq, charge, n_peaks, n_matched, prop))
+                    results.append(
+                        (scan, filename, seq, charge, n_peaks, n_matched, prop)
+                    )
                     n_scored += 1
                     if n_scored % 10000 == 0:
                         print(f"  {n_scored} spectra scored ...", file=sys.stderr)
@@ -679,7 +692,9 @@ def _compute_coverage_results(
                     )
                 else:
                     _, scan, seq, err_str = item
-                    print(f"  Skipping scan {scan} ({seq!r}): {err_str}", file=sys.stderr)
+                    print(
+                        f"  Skipping scan {scan} ({seq!r}): {err_str}", file=sys.stderr
+                    )
                     n_skipped += 1
 
     return results, n_skipped
@@ -734,8 +749,12 @@ def fragment_coverage(
 
     with mgf.MGF(mgf_file) as reader:
         results, n_skipped = _compute_coverage_results(
-            reader, tolerance, tolerance_unit, workers=workers,
-            max_charge=max_charge, neutral_losses=neutral_losses,
+            reader,
+            tolerance,
+            tolerance_unit,
+            workers=workers,
+            max_charge=max_charge,
+            neutral_losses=neutral_losses,
         )
 
     count = len(results) + n_skipped
@@ -754,11 +773,19 @@ def fragment_coverage(
     results.sort(key=lambda r: r[6])
     with open(output_tsv, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
-        w.writerow(["scan", "filename", "sequence", "charge", "n_peaks",
-                     "n_matched", "proportion_matched"])
+        w.writerow(
+            [
+                "scan",
+                "filename",
+                "sequence",
+                "charge",
+                "n_peaks",
+                "n_matched",
+                "proportion_matched",
+            ]
+        )
         for scan, filename, seq, charge, n_peaks, n_matched, prop in results:
-            w.writerow([scan, filename, seq, charge, n_peaks, n_matched,
-                        f"{prop:.6f}"])
+            w.writerow([scan, filename, seq, charge, n_peaks, n_matched, f"{prop:.6f}"])
     print(f"Wrote {output_tsv}", file=sys.stderr)
 
     # -- Histogram -----------------------------------------------------------
@@ -816,7 +843,9 @@ def _build_summary_html(
     def _table(header_row, data_rows):
         ths = "".join(f"<th>{html_mod.escape(str(h))}</th>" for h in header_row)
         trs = "".join(
-            "<tr>" + "".join(f"<td>{html_mod.escape(str(v))}</td>" for v in row) + "</tr>"
+            "<tr>"
+            + "".join(f"<td>{html_mod.escape(str(v))}</td>" for v in row)
+            + "</tr>"
             for row in data_rows
         )
         return f"<table><tr>{ths}</tr>{trs}</table>"
@@ -865,9 +894,7 @@ def _build_summary_html(
             )
         else:
             lengths_html = "<p class='note'>No annotated spectra.</p>"
-        lengths_section = (
-            f"<h2>Peptide Lengths</h2>{lengths_html}{_img(lengths_png)}"
-        )
+        lengths_section = f"<h2>Peptide Lengths</h2>{lengths_html}{_img(lengths_png)}"
 
     coverage_section = ""
     if coverage_png is not None:
@@ -1062,11 +1089,11 @@ def summarize_mgf(
                         parsed_seq, props = pyteomics_proforma.parse(seq)
                         length_counts[len(parsed_seq)] += 1
                         for residue, mods in parsed_seq:
-                            for mod in (mods or []):
+                            for mod in mods or []:
                                 mod_counts[(residue, str(mod))] += 1
-                        for mod in (props.get("n_term") or []):
+                        for mod in props.get("n_term") or []:
                             mod_counts[("N-term", str(mod))] += 1
-                        for mod in (props.get("c_term") or []):
+                        for mod in props.get("c_term") or []:
                             mod_counts[("C-term", str(mod))] += 1
                     except Exception:
                         n_parse_errors += 1
@@ -1092,8 +1119,12 @@ def summarize_mgf(
             print("Computing fragment ion coverage ...", file=sys.stderr)
             with mgf.MGF(mgf_file) as reader:
                 cov_results, n_cov_skipped = _compute_coverage_results(
-                    reader, tolerance, tolerance_unit, workers=workers,
-                    max_charge=max_charge, neutral_losses=neutral_losses,
+                    reader,
+                    tolerance,
+                    tolerance_unit,
+                    workers=workers,
+                    max_charge=max_charge,
+                    neutral_losses=neutral_losses,
                 )
 
             cov_n = len(cov_results)
@@ -1164,13 +1195,18 @@ def summarize_mgf(
                 cov_tsv_path = os.path.join(output_root, "fragment_coverage.tsv")
                 _write_tsv(
                     cov_tsv_path,
-                    ["scan", "filename", "sequence", "charge",
-                     "n_peaks", "n_matched", "proportion_matched"],
                     [
-                        (scan, filename, seq, charge, n_peaks, n_matched,
-                         f"{prop:.6f}")
-                        for scan, filename, seq, charge, n_peaks, n_matched, prop
-                        in cov_results
+                        "scan",
+                        "filename",
+                        "sequence",
+                        "charge",
+                        "n_peaks",
+                        "n_matched",
+                        "proportion_matched",
+                    ],
+                    [
+                        (scan, filename, seq, charge, n_peaks, n_matched, f"{prop:.6f}")
+                        for scan, filename, seq, charge, n_peaks, n_matched, prop in cov_results
                     ],
                 )
 
