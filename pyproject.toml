@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { email = "gwenneth.straub@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "depthcharge-ms>=0.4.9",
     "fire>=0.7.1",
@@ -15,6 +15,7 @@ dependencies = [
     "pandas>=2.3.3",
     "polars>=1.35.2",
     "pyteomics>=4.7.5",
+    "spectrum_utils>=0.5.0",
     "pyyaml>=6.0.3",
     "seaborn>=0.13.2",
     "tabulate>=0.10.0",
