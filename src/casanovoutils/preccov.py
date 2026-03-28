@@ -1,10 +1,47 @@
+"""
+Precision-coverage computation for peptide and amino acid evaluation.
+
+Provides an end-to-end pipeline that takes predicted and ground truth PSM
+DataFrames, aligns token sequences with gap insertion, and computes cumulative
+precision-coverage (Prec-Cov) curves. Results can be exported as DataFrames
+or rendered as matplotlib figures.
+
+The main entry points are:
+
+- :func:`get_prec_cov_df` — builds a precision-coverage DataFrame at either
+  peptide or amino acid level.
+- :func:`graph_prec_cov` — plots pre-computed precision-coverage DataFrames.
+- :class:`GraphPrecCov` — stateful plot builder, intended for programmatic or
+  CLI use via Fire.
+
+The module is also executable as a CLI via ``python -m casanovoutils.prec_cov``
+(or the installed ``casanovoutils`` entry point), exposing ``get_pc_df`` and
+``graph_prec_cov`` as subcommands.
+"""
+
 import dataclasses
+import functools
+import logging
+import pathlib
 from os import PathLike
+from typing import Any, Optional
 
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl
+import tqdm
 
-from .evaluate import get_ground_truth, prec_cov
+from .align import align_tokens_with_gaps
+from .constants import Constants
+from .denovoutils import (
+    DfPath,
+    configure_logging,
+    get_ground_truth_df,
+    read_dataframe,
+    tokenize_sequences,
+    write_dataframe,
+)
 
 
 @dataclasses.dataclass
@@ -23,9 +60,9 @@ class GraphPrecCov:
 
     Parameters
     ----------
-    fig_width : float, default=3.0
+    fig_width : float, default=4.0
         Width of the matplotlib figure in inches.
-    fig_height : float, default=3.0
+    fig_height : float, default=4.0
         Height of the matplotlib figure in inches.
     fig_dpi : int, default=150
         Figure resolution in dots per inch.
@@ -45,23 +82,12 @@ class GraphPrecCov:
     Each call to ``add_peptides()`` adds a new curve to the same axes. Use
     ``clear()`` to reset the figure.
 
-    Fire CLI Example
-    ----------------
-    .. code-block:: bash
-
-        python script.py graph-prec-cov \
-            --fig_width 6 --fig_height 4 \
-            --legend_location "upper right" \
-            add-peptides modelA.mztab modelA.mgf ModelA \
-            add-peptides modelB.mztab modelB.mgf ModelB \
-            save plot.png
-
     All commands operate on the same instance, so state (the accumulated
     curves) is preserved.
     """
 
-    fig_width: float = 3.0
-    fig_height: float = 3.0
+    fig_width: float = 4.0
+    fig_height: float = 4.0
     fig_dpi: int = 150
     legend_border: bool = False
     legend_location: str = "lower left"
@@ -73,49 +99,53 @@ class GraphPrecCov:
         """Initialize an empty plot upon instantiation."""
         self.clear()
 
-    def add_peptides(
+    def add_series(
         self,
-        mztab_path: PathLike,
-        mgf_path: PathLike,
-        name: str,
-        replace_i_l: bool = True,
+        pc_df: pl.DataFrame,
+        series_name: str,
+        color: Optional[str] = None,
+        linestyle: Optional[str] = None,
     ) -> None:
         """
-        Add a peptide-level precision–coverage curve for one dataset.
+        Add a precision-coverage curve for a single dataset to the plot.
 
-        Predicted peptide scores and correctness labels are derived using
-        ``get_ground_truth()``, then a precision–coverage curve is computed with
-        ``prec_cov()`` and added to the current plot.
+        Extracts precision and coverage columns from ``pc_df``, computes the
+        area under the precision-coverage curve (AUPC) via the trapezoidal
+        rule, and plots the curve with ``series_name`` and the AUPC value
+        in the legend label.
 
         Parameters
         ----------
-        mztab_path : PathLike
-            Path to an MzTab file containing peptide-spectrum match (PSM)
-            predictions and associated scores.
-        mgf_path : PathLike
-            Path to the MGF file used to derive ground-truth peptide sequences.
-            This is passed directly to ``get_ground_truth()``.
-        name : str
-            Dataset name used in the legend.
-        replace_i_l : bool, default=True
-            Whether to treat isoleucine (I) and leucine (L) as equivalent when
-            determining correctness.
+        pc_df : pl.DataFrame
+            A DataFrame containing ``Constants.precision_column`` and
+            ``Constants.coverage_column`` columns, as produced by
+            :func:`calc_precision_coverage`.
+        series_name : str
+            Display name for this dataset in the plot legend.
+        color : str, optional
+            Line color passed to ``matplotlib.axes.Axes.plot``. If ``None``
+            (default), matplotlib's automatic color cycling is used.
+        linestyle : str, optional
+            Line style passed to ``matplotlib.axes.Axes.plot`` (e.g. ``"-"``,
+            ``"--"``, ``":"``). If ``None`` (default), matplotlib's default
+            solid line style is used.
 
         Returns
         -------
         None
         """
-        predictions_df = get_ground_truth(mztab_path, mgf_path, replace_i_l=replace_i_l)
-        prec, cov, aupc = prec_cov(
-            predictions_df["pep_score"].to_numpy(),
-            predictions_df["pep_correct"].to_numpy(),
-        )
+        precision = pc_df.get_column(Constants.precision_column).to_numpy()
+        coverage = pc_df.get_column(Constants.coverage_column).to_numpy()
+        aupc = np.trapz(precision, coverage)
 
-        self.ax.plot(cov, prec, label=f"{name} {aupc:.3f}")
+        kwargs = {}
+        if color is not None:
+            kwargs["color"] = color
+        if linestyle is not None:
+            kwargs["linestyle"] = linestyle
+
+        self.ax.plot(coverage, precision, label=f"{series_name} {aupc:.4f}", **kwargs)
         self.ax.legend(loc="lower left")
-
-    def add_amino_acids(*args, **kwargs) -> None:
-        raise NotImplementedError()
 
     def clear(self) -> None:
         """
@@ -138,7 +168,7 @@ class GraphPrecCov:
         self.ax.set_ylim(0, 1)
         self.ax.set_xlabel(self.ax_x_label)
         self.ax.set_ylabel(self.ax_y_label)
-        self.ax.set_title(f"{self.ax_title} (Amino Acid)")
+        self.ax.set_title(self.ax_title)
 
     def save(self, save_path: PathLike) -> None:
         """
@@ -168,141 +198,480 @@ class GraphPrecCov:
         self.fig.show()
 
 
-def main() -> None:
-    """CLI entry"""
-    fire.Fire(GraphPrecCov)
+def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str, Any]:
+    """
+    Align predicted and ground truth token sequences within a single row dict.
+
+    Calls :func:`align_tokens_with_gaps` on the predicted tokens, ground truth
+    tokens, and per-amino-acid scores from the row, then mutates the row in
+    place with the aligned sequences, aligned scores, and a positional index
+    list.
+
+    Parameters
+    ----------
+    tie_break_suffix : bool
+        Passed through to :func:`align_tokens_with_gaps`. Controls tie-breaking
+        behaviour when the gap and no-gap paths score equally during traceback.
+    row : dict[str, Any]
+        A single row represented as a dict, as produced by
+        ``DataFrame.iter_rows(named=True)``.
+
+    Returns
+    -------
+    dict[str, Any]
+        The same row dict with ``Constants.predicted_tokens``,
+        ``Constants.ground_truth_tokens``,
+        ``Constants.aa_scores_column``, and ``Constants.aa_idx_column``
+        replaced by their gap-aligned counterparts.
+    """
+    aligned_predicted, aligned_ground_truth, aligned_scores = align_tokens_with_gaps(
+        row[Constants.predicted_tokens],
+        row[Constants.ground_truth_tokens],
+        row[Constants.aa_scores_column],
+        tie_break_suffix=tie_break_suffix,
+    )
+
+    row[Constants.predicted_tokens] = aligned_predicted
+    row[Constants.ground_truth_tokens] = aligned_ground_truth
+    row[Constants.aa_scores_column] = aligned_scores
+    row[Constants.aa_idx_column] = list(range(len(aligned_predicted)))
+
+    return row
 
 
-if __name__ == "__main__":
-    main()
+def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame:
+    """
+    Compute cumulative precision and coverage curves sorted by score.
 
-    fig_width: float = 3.0
-    fig_height: float = 3.0
-    fig_dpi: int = 150
-    legend_border: bool = False
-    legend_location: str = "lower left"
-    ax_x_label: str = "Coverage"
-    ax_y_label: str = "Precision"
-    ax_title: str = ""
+    Sorts the DataFrame by ``score_col`` in descending order, computes a
+    boolean correctness column indicating where the predicted sequence matches
+    the ground truth, then calculates cumulative precision and coverage at
+    each rank threshold.
 
-    def __post_init__(self):
-        """Initialize an empty plot upon instantiation."""
-        self.clear()
+    Parameters
+    ----------
+    pc_df : pl.DataFrame
+        Input DataFrame containing predicted and ground truth sequence columns
+        and a score column.
+    score_col : str
+        Name of the column to sort by. Typically either the peptide-level
+        score column or the per-amino-acid score column depending on whether
+        evaluation is at peptide or amino acid level.
 
-    def add_peptides(
-        self,
-        mztab_path: PathLike,
-        mgf_path: PathLike,
-        name: str,
-        replace_i_l: bool = True,
-    ) -> None:
-        """
-        Add a precision-coverage curve trace for a dataset.
+    Returns
+    -------
+    pl.DataFrame
+        The input DataFrame sorted by ``score_col`` with three additional
+        columns: ``"pc_is_correct"`` (bool), ``"pc_precision"`` (float),
+        and ``"pc_coverage"`` (float).
+    """
+    logging.debug("Computing precision-coverage using score column '%s'", score_col)
 
-        This function extracts predicted peptide sequences and prediction scores
-        from an MzTab file, obtains ground truth sequences either from the same
-        file or a corresponding MGF file, evaluates amino-acid-level
-        correctness, and plots the precision-coverage curve with an AUPC value
-        in the legend.
+    pc_df = pc_df.sort(score_col, descending=True)
+    pc_df = pc_df.with_columns(
+        (
+            pl.col(Constants.ground_truth_tokens) == pl.col(Constants.predicted_tokens)
+        ).alias("pc_is_correct")
+    )
 
-        Parameters
-        ----------
-        mztab_path : PathLike
-            Path to an MzTab file containing peptide-spectrum matches (PSMs).
-        name : str
-            Name of the dataset; used in the plot legend.
-        pred_col : str, optional
-            Column name in the MzTab file containing predicted peptide sequences.
-            Defaults to "sequence".
-        score_col : str, optional
-            Column name in the MzTab file containing prediction scores used to rank
-            PSMs. Defaults to "search_engine_score[1]".
-        ground_truth_col : str, optional
-            Column name in the MzTab containing ground truth peptide sequences.
-            If provided, ground truth is taken from MzTab.
-        ground_truth_mgf : PathLike, optional
-            Path to an MGF file from which to extract ground truth sequences.
-            Required if ``ground_truth_col`` is None.
-        residues_path : PathLike, optional
-            Path to a YAML file containing residue masses. Passed to
-            ``get_residues()`` for amino acid evaluation.
+    is_correct = pc_df.get_column("pc_is_correct").to_numpy()
 
-        Returns
-        -------
-        None
-
-        Raises
-        ------
-        ValueError
-            If neither ``ground_truth_col`` nor ``ground_truth_mgf`` is provided.
-        """
-        predictions_df = get_ground_truth(mztab_path, mgf_path, replace_i_l=replace_i_l)
-        prec, cov, aupc = prec_cov(
-            predictions_df["pep_score"].to_numpy(),
-            predictions_df["pep_correct"].to_numpy(),
+    if len(is_correct) == 0:
+        logging.warning("No correct predictions found")
+        return pc_df.with_columns(
+            pl.lit(None).alias("pc_precision"),
+            pl.lit(None).alias("pc_coverage"),
         )
 
-        self.ax.plot(cov, prec, label=f"{name} {aupc:.3f}")
-        self.ax.legend(loc="lower left")
+    n_correct = is_correct.sum()
+    logging.info(
+        "Correctness: %d / %d (%.1f%%)",
+        n_correct,
+        len(is_correct),
+        100 * n_correct / len(is_correct),
+    )
 
-    def add_amino_acids(*args, **kwargs) -> None:
-        raise NotImplementedError()
+    total_coverage = np.arange(1, len(is_correct) + 1)
+    total_precision = np.cumsum(is_correct)
+    precision = total_precision / total_coverage
+    coverage = total_coverage / total_coverage[-1]
 
-    def clear(self) -> None:
-        """
-        Reset the figures and axes to blank precision-coverage plots.
+    logging.debug(
+        "Precision-coverage curve: precision at full coverage = %.3f", precision[-1]
+    )
 
-        Creates two matplotlib figures + axes:
-        1) amino-acid-level precision/coverage plot
-        2) peptide-level precision/coverage plot
+    pc_df = pc_df.with_columns(
+        pl.Series("pc_precision", precision), pl.Series("pc_coverage", coverage)
+    )
 
-        Returns
-        -------
-        None
-        """
-        # Amino-acid-level figure
-        self.fig, self.ax = plt.subplots(
-            figsize=(self.fig_width, self.fig_height),
-            dpi=self.fig_dpi,
+    return pc_df
+
+
+def load_ground_truth_df(
+    ground_truth_df: Optional[DfPath],
+    mgf_df: Optional[DfPath],
+    mztab_df: Optional[DfPath],
+) -> pl.DataFrame:
+    """
+    Load or construct a ground truth PSM DataFrame.
+
+    If ``ground_truth_df`` is provided, it is loaded via :func:`read_dataframe`.
+    Otherwise, the ground truth is constructed from the provided MGF and mzTab
+    files via :func:`get_ground_truth_df`.
+
+    Parameters
+    ----------
+    ground_truth_df : DfPath, optional
+        Path to or an already-loaded ground truth DataFrame.
+    mgf_df : DfPath, optional
+        Path to or an already-loaded MGF PSM DataFrame. Required when
+        ``ground_truth_df`` is ``None``.
+    mztab_df : DfPath, optional
+        Path to or an already-loaded mzTab DataFrame. Required when
+        ``ground_truth_df`` is ``None``.
+
+    Returns
+    -------
+    pl.DataFrame
+        The loaded or constructed ground truth DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If ``ground_truth_df`` is ``None`` and either ``mgf_df`` or
+        ``mztab_df`` is also ``None``.
+    """
+    if ground_truth_df is None and (mgf_df is None or mztab_df is None):
+        raise ValueError(
+            "--mgf_df and --mztab_df must be provided if --ground_truth_df is not"
+            " provided."
         )
 
-        self.ax.set_xlim(0, 1)
-        self.ax.set_ylim(0, 1)
-        self.ax.set_xlabel(self.ax_x_label)
-        self.ax.set_ylabel(self.ax_y_label)
-        self.ax.set_title(f"{self.ax_title} (Amino Acid)")
+    if ground_truth_df is not None:
+        logging.info("Loading ground truth DataFrame from provided source")
+        result = read_dataframe(ground_truth_df)
+        logging.info("Loaded ground truth DataFrame with %d rows", len(result))
+        return result
 
-    def save(self, save_path: PathLike) -> None:
-        """
-        Save the current plot to a file.
+    logging.info("Constructing ground truth DataFrame from MGF and mzTab sources")
+    result = get_ground_truth_df(mgf_df, mztab_df)
+    logging.info("Constructed ground truth DataFrame with %d rows", len(result))
+    return result
 
-        Parameters
-        ----------
-        save_path : PathLike
-            Output file path. The file extension (e.g., .png, .pdf, .svg)
-            determines the format written by matplotlib.
 
-        Returns
-        -------
-        None
-        """
-        self.fig.tight_layout()
-        self.fig.savefig(save_path)
+def fill_null_columns(df: pl.DataFrame, pred_col: str) -> pl.DataFrame:
+    """
+    Replace null values in score and sequence columns with safe defaults.
 
-    def show(self) -> None:
-        """
-        Display the current precision-coverage plot.
+    Fills nulls in the predicted sequence column and the per-amino-acid scores
+    column with empty strings, and nulls in the peptide score column with
+    ``-1.0``.
 
-        Returns
-        -------
-        None
-        """
-        self.fig.show()
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Input DataFrame containing the columns to fill.
+    pred_col : str
+        Name of the predicted sequence column.
+
+    Returns
+    -------
+    pl.DataFrame
+        The DataFrame with null values replaced.
+    """
+    n_null_pred = df[pred_col].null_count()
+    n_null_aa = df[Constants.aa_scores_column].null_count()
+    n_null_pep = df[Constants.pep_score_column].null_count()
+
+    if any(n > 0 for n in [n_null_pred, n_null_aa, n_null_pep]):
+        logging.debug(
+            "Filling nulls — %s: %d, %s: %d, %s: %d",
+            pred_col,
+            n_null_pred,
+            Constants.aa_scores_column,
+            n_null_aa,
+            Constants.pep_score_column,
+            n_null_pep,
+        )
+
+    return df.with_columns(
+        pl.col([pred_col, Constants.aa_scores_column]).fill_null("")
+    ).with_columns(pl.col(Constants.pep_score_column).fill_null(-1.0))
+
+
+def tokenize_and_parse_scores(
+    df: pl.DataFrame,
+    pred_col: str,
+    residues_path: Optional[PathLike],
+    replace_isoleucine_with_leucine: bool,
+) -> pl.DataFrame:
+    """
+    Tokenize predicted and ground truth sequences and parse per-AA score strings.
+
+    Applies :func:`tokenize_sequences` to both the ground truth and predicted
+    sequence columns, then parses the comma-separated per-amino-acid score
+    strings in the aa scores column into lists of floats.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Input DataFrame containing sequence and score columns.
+    pred_col : str
+        Name of the predicted sequence column.
+    residues_path : PathLike, optional
+        Path to a residue mass YAML file. If ``None``, the bundled
+        ``residues.yaml`` is used.
+    replace_isoleucine_with_leucine : bool
+        If ``True``, isoleucine (I) is replaced with leucine (L) during
+        tokenization, treating them as equivalent.
+
+    Returns
+    -------
+    pl.DataFrame
+        The DataFrame with added token columns and the aa scores column
+        converted from comma-separated strings to lists of floats.
+    """
+    logging.info(
+        "Tokenizing sequences (replace_isoleucine_with_leucine=%s)",
+        replace_isoleucine_with_leucine,
+    )
+    logging.debug(
+        "Tokenizing ground truth column '%s'", Constants.ground_truth_sequence_column
+    )
+    df = tokenize_sequences(
+        df,
+        seq_column=Constants.ground_truth_sequence_column,
+        residues_path=residues_path,
+        replace_isoleucine_with_leucine=replace_isoleucine_with_leucine,
+    )
+
+    logging.debug("Tokenizing predicted column '%s'", pred_col)
+    df = tokenize_sequences(
+        df,
+        seq_column=pred_col,
+        residues_path=residues_path,
+        replace_isoleucine_with_leucine=replace_isoleucine_with_leucine,
+    )
+
+    logging.debug(
+        "Parsing per-amino-acid score strings in column '%s'",
+        Constants.aa_scores_column,
+    )
+    aa_score_fun = lambda x: [] if x == "" else [float(c) for c in x.split(",")]
+    return df.with_columns(
+        pl.col(Constants.aa_scores_column).map_elements(
+            aa_score_fun, return_dtype=pl.List(pl.Float64)
+        )
+    )
+
+
+def align_and_explode(
+    df: pl.DataFrame,
+    tie_break_suffix: bool,
+) -> pl.DataFrame:
+    """
+    Align predicted and ground truth token sequences and explode to per-AA rows.
+
+    Iterates over each row, aligns the predicted and ground truth token
+    sequences with gap insertion via :func:`mutate_row_as_dict`, then explodes
+    the resulting list columns so that each row corresponds to a single amino
+    acid position.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Input DataFrame with tokenized predicted and ground truth sequence
+        columns and parsed per-amino-acid scores.
+    tie_break_suffix : bool
+        Passed through to :func:`mutate_row_as_dict`. Controls tie-breaking
+        behavior when the gap and no-gap paths score equally during traceback.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame exploded to one row per aligned amino acid position,
+        with gap characters inserted where sequences do not align.
+    """
+    logging.info(
+        "Aligning %d rows at amino acid level (tie_break_suffix=%s)",
+        len(df),
+        tie_break_suffix,
+    )
+
+    row_iter = df.iter_rows(named=True)
+    row_iter = tqdm.tqdm(row_iter, desc="Aligning Amino Acids", total=len(df))
+    row_iter = map(
+        functools.partial(mutate_row_as_dict, tie_break_suffix),
+        row_iter,
+    )
+    df = pl.from_dicts(row_iter)
+
+    logging.debug("Exploding aligned columns to per-amino-acid rows")
+    df = df.explode(
+        [
+            Constants.predicted_tokens,
+            Constants.ground_truth_tokens,
+            Constants.aa_scores_column,
+            Constants.aa_idx_column,
+        ]
+    )
+    logging.info("Exploded to %d per-amino-acid rows", len(df))
+    return df
+
+
+def get_prec_cov_df(
+    ground_truth_df: Optional[DfPath] = None,
+    mgf_df: Optional[DfPath] = None,
+    mztab_df: Optional[DfPath] = None,
+    residues_path: Optional[DfPath] = None,
+    replace_isoleucine_with_leucine: bool = True,
+    aa_level: bool = False,
+    align_tie_beak_suffix: bool = True,
+    out_path: Optional[PathLike] = None,
+) -> pl.DataFrame:
+    """
+    Build a precision-coverage DataFrame from predicted and ground truth PSMs.
+
+    Loads or constructs a ground truth DataFrame, tokenizes both predicted and
+    ground truth sequences, parses per-amino-acid scores, and computes
+    precision-coverage metrics. When ``aa_level`` is ``True``, sequences are
+    first aligned with gap insertion and then exploded so that each row
+    represents a single amino acid position rather than a full peptide.
+
+    Parameters
+    ----------
+    ground_truth_df : DfPath, optional
+        Path to or an already-loaded ground truth DataFrame. If ``None``,
+        both ``mgf_df`` and ``mztab_df`` must be provided and the ground
+        truth DataFrame will be constructed via :func:`get_ground_truth_df`.
+    mgf_df : DfPath, optional
+        Path to or an already-loaded MGF PSM DataFrame. Required when
+        ``ground_truth_df`` is ``None``.
+    mztab_df : DfPath, optional
+        Path to or an already-loaded mzTab DataFrame. Required when
+        ``ground_truth_df`` is ``None``.
+    residues_path : DfPath, optional
+        Path to a residue mass YAML file passed through to
+        :func:`tokenize_sequences`. If ``None``, the bundled
+        ``residues.yaml`` is used.
+    replace_isoleucine_with_leucine : bool, optional
+        If ``True`` (default), isoleucine (I) is replaced with leucine (L)
+        during tokenization, treating them as equivalent.
+    aa_level : bool, optional
+        If ``True``, perform per-amino-acid alignment via gap insertion and
+        explode the DataFrame so each row corresponds to a single amino acid
+        position. If ``False`` (default), metrics are computed at the peptide
+        level using the peptide-level score column.
+    align_tie_beak_suffix : bool, optional
+        Passed through to the alignment step when ``aa_level`` is ``True``.
+        Controls tie-breaking behavior when the gap and no-gap paths score
+        equally during traceback. Defaults to ``True``.
+    out_path : PathLike, optional
+        If provided, the resulting DataFrame is written to this path before
+        being returned. The format is inferred from the file extension.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with precision and coverage metrics. At peptide level,
+        each row is one PSM; at amino acid level (``aa_level=True``), each
+        row is one aligned amino acid position.
+
+    Raises
+    ------
+    ValueError
+        If ``ground_truth_df`` is ``None`` and either ``mgf_df`` or
+        ``mztab_df`` is also ``None``.
+    """
+    logging.info(
+        "Building precision-coverage DataFrame (aa_level=%s, align_tie_beak_suffix=%s)",
+        aa_level,
+        align_tie_beak_suffix,
+    )
+
+    pc_df = load_ground_truth_df(ground_truth_df, mgf_df, mztab_df)
+
+    pred_col = Constants.get_pred_sequence_column(pc_df)
+    logging.debug("Using predicted sequence column '%s'", pred_col)
+
+    pc_df = fill_null_columns(pc_df, pred_col)
+    pc_df = tokenize_and_parse_scores(
+        pc_df, pred_col, residues_path, replace_isoleucine_with_leucine
+    )
+
+    if aa_level:
+        pc_df = align_and_explode(pc_df, align_tie_beak_suffix)
+
+    score_col = Constants.aa_scores_column if aa_level else Constants.pep_score_column
+    logging.debug("Computing precision-coverage with score column '%s'", score_col)
+    pc_df = calc_precision_coverage(pc_df, score_col)
+
+    logging.info(
+        "Precision-coverage DataFrame complete: %d rows, %d columns",
+        len(pc_df),
+        len(pc_df.columns),
+    )
+
+    if out_path is not None:
+        logging.info("Writing precision coverage DataFrame to %s", str(out_path))
+        write_dataframe(pc_df, out_path)
+
+    return pc_df
+
+
+def graph_prec_cov(*pc_df_paths: PathLike, out_path: Optional[PathLike] = None) -> None:
+    """
+    Plot precision-coverage curves from one or more pre-computed DataFrames.
+
+    Loads each DataFrame from ``pc_df_paths``, adds it as a series to a
+    :class:`GraphPrecCov` plot using the file stem as the series name, and
+    then either saves the figure, displays it, or both.
+
+    Parameters
+    ----------
+    *pc_df_paths : PathLike
+        One or more paths to DataFrames containing
+        ``Constants.precision_column`` and ``Constants.coverage_column``
+        columns, as produced by :func:`get_prec_cov_df`. The file stem of each
+        path is used as the series label in the legend.
+    out_path : PathLike, optional
+        If provided, the figure is saved to this path. The file extension
+        determines the format (e.g. ``.png``, ``.pdf``, ``.svg``).
+
+    Returns
+    -------
+    None
+
+    Warns
+    -----
+    Logs a warning if the plot cannot be displayed, which typically occurs
+    when no graphical backend is available (e.g. in a headless environment).
+    In that case, saving via ``out_path`` still works normally.
+    """
+    graph_pc = GraphPrecCov()
+    for curr_path in pc_df_paths:
+        curr_path = pathlib.Path(curr_path)
+        curr_name = curr_path.stem
+        curr_df = read_dataframe(curr_path)
+        graph_pc.add_series(curr_df, curr_name)
+
+    if out_path is not None:
+        graph_pc.save(out_path)
+
+    try:
+        graph_pc.show()
+    except Exception:
+        logging.warning("Tried to show precision coverage plot.")
+        logging.warning("Is a graphical backend installed?")
+        logging.warning(
+            "Note: If you are just trying to save a plot you can ignore this."
+        )
 
 
 def main() -> None:
     """CLI entry"""
-    fire.Fire(GraphPrecCov)
+    configure_logging()
+    fire.Fire({"get_pc_df": get_prec_cov_df, "graph_prec_cov": graph_prec_cov})
 
 
 if __name__ == "__main__":

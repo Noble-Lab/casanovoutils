@@ -1,147 +1,250 @@
-# test_graph_prec_cov.py
-#
-# Pytest tests for GraphPrecCov.
-#
-# - Uses matplotlib "Agg" backend (no GUI)
-# - Monkeypatches get_ground_truth / prec_cov so we don't depend on real files
-# - Verifies:
-#   * __post_init__/clear sets up axes limits/labels/title
-#   * add_peptides calls helpers with correct args and plots correct data/label
-#   * save writes a file
-#   * add_amino_acids raises NotImplementedError
-#
-# IMPORTANT: change the import to match your package/module path.
-
-from __future__ import annotations
-
-import matplotlib
-import numpy as np
-import pandas as pd
+import polars as pl
+import polars.testing
 import pytest
 
-matplotlib.use("Agg")  # headless backend for CI
+from casanovoutils.constants import Constants
+from casanovoutils.preccov import (
+    align_tokens_with_gaps,
+    calc_precision_coverage,
+    fill_null_columns,
+    load_ground_truth_df,
+    mutate_row_as_dict,
+)
 
-
-# CHANGE THIS to your real module, e.g.
-# from casanovoutils.graph_prec_cov import GraphPrecCov
-from casanovoutils.preccov import GraphPrecCov
+# ── fixtures ──────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def dummy_predictions_df() -> pd.DataFrame:
-    return pd.DataFrame(
+def pred_col():
+    return "mztab_sequence"
+
+
+@pytest.fixture
+def pc_input_df():
+    return pl.DataFrame(
         {
-            "pep_score": np.array([0.2, 0.9, 0.5], dtype=float),
-            "pep_correct": np.array([False, True, True], dtype=bool),
+            Constants.predicted_tokens: ["A", "B", "C", "D"],
+            Constants.ground_truth_tokens: ["A", "X", "C", "Y"],
+            Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
+            Constants.aa_scores_column: ["", "", "", ""],
         }
     )
 
 
-def test_init_calls_clear_and_sets_axes_defaults():
-    g = GraphPrecCov(
-        fig_width=4.0,
-        fig_height=2.5,
-        fig_dpi=123,
-        ax_x_label="Cov",
-        ax_y_label="Prec",
-        ax_title="MyTitle",
+# ── fill_null_columns ─────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def nullable_df():
+    return pl.DataFrame(
+        {
+            "mztab_sequence": [None, "PEPTIDE"],
+            Constants.aa_scores_column: [None, "0.9,0.8"],
+            Constants.pep_score_column: [None, 0.95],
+        }
     )
 
-    # Ax exists and is configured
-    assert g.fig is not None
-    assert g.ax is not None
 
-    # Limits
-    assert g.ax.get_xlim() == (0.0, 1.0)
-    assert g.ax.get_ylim() == (0.0, 1.0)
-
-    # Labels/title (note: code appends "(Amino Acid)")
-    assert g.ax.get_xlabel() == "Cov"
-    assert g.ax.get_ylabel() == "Prec"
-    assert g.ax.get_title() == "MyTitle (Amino Acid)"
+def test_fill_null_columns_fills_predicted(nullable_df):
+    result = fill_null_columns(nullable_df, "mztab_sequence")
+    assert result["mztab_sequence"][0] == ""
 
 
-def test_clear_resets_figure_and_axes_objects():
-    g = GraphPrecCov()
-    old_fig, old_ax = g.fig, g.ax
-
-    g.clear()
-    assert g.fig is not old_fig
-    assert g.ax is not old_ax
-
-    # still configured
-    assert g.ax.get_xlim() == (0.0, 1.0)
-    assert g.ax.get_ylim() == (0.0, 1.0)
+def test_fill_null_columns_fills_aa_scores(nullable_df):
+    result = fill_null_columns(nullable_df, "mztab_sequence")
+    assert result[Constants.aa_scores_column][0] == ""
 
 
-def test_add_peptides_calls_helpers_and_plots(monkeypatch, dummy_predictions_df):
-    g = GraphPrecCov()
+def test_fill_null_columns_fills_pep_score(nullable_df):
+    result = fill_null_columns(nullable_df, "mztab_sequence")
+    assert result[Constants.pep_score_column][0] == -1.0
 
-    calls = {"get_ground_truth": [], "prec_cov": []}
 
-    def fake_get_ground_truth(mztab_path, mgf_path, replace_i_l=False):
-        calls["get_ground_truth"].append((mztab_path, mgf_path, replace_i_l))
-        return dummy_predictions_df
+def test_fill_null_columns_preserves_non_null(nullable_df):
+    result = fill_null_columns(nullable_df, "mztab_sequence")
+    assert result["mztab_sequence"][1] == "PEPTIDE"
+    assert result[Constants.aa_scores_column][1] == "0.9,0.8"
+    assert result[Constants.pep_score_column][1] == pytest.approx(0.95)
 
-    # Return a curve where we can assert exact values were plotted
-    fake_prec = np.array([1.0, 0.5, 2 / 3], dtype=float)
-    fake_cov = np.array([1 / 3, 2 / 3, 1.0], dtype=float)
-    fake_aupc = 0.42
 
-    def fake_prec_cov(scores, is_correct):
-        # record that inputs were to_numpy() arrays
-        calls["prec_cov"].append((scores.copy(), is_correct.copy()))
-        return fake_prec, fake_cov, fake_aupc
+# ── load_ground_truth_df ──────────────────────────────────────────────────────
 
-    import casanovoutils.preccov as mod
 
-    monkeypatch.setattr(mod, "get_ground_truth", fake_get_ground_truth)
-    monkeypatch.setattr(mod, "prec_cov", fake_prec_cov)
+def test_load_ground_truth_df_raises_without_inputs():
+    with pytest.raises(ValueError, match="--mgf_df and --mztab_df must be provided"):
+        load_ground_truth_df(None, None, None)
 
-    g.add_peptides("x.mztab", "y.mgf", "ModelX", replace_i_l=True)
 
-    # Helper calls
-    assert calls["get_ground_truth"] == [("x.mztab", "y.mgf", True)]
-    assert len(calls["prec_cov"]) == 1
+@pytest.fixture
+def simple_df():
+    return pl.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
 
-    got_scores, got_is_correct = calls["prec_cov"][0]
-    assert np.allclose(got_scores, dummy_predictions_df["pep_score"].to_numpy())
-    assert np.array_equal(
-        got_is_correct, dummy_predictions_df["pep_correct"].to_numpy()
+
+def test_load_ground_truth_df_raises_with_only_mgf(simple_df):
+    with pytest.raises(ValueError, match="--mgf_df and --mztab_df must be provided"):
+        load_ground_truth_df(None, simple_df, None)
+
+
+def test_load_ground_truth_df_raises_with_only_mztab(simple_df):
+    with pytest.raises(ValueError, match="--mgf_df and --mztab_df must be provided"):
+        load_ground_truth_df(None, None, simple_df)
+
+
+def test_load_ground_truth_df_passthrough(simple_df):
+    result = load_ground_truth_df(simple_df, None, None)
+    polars.testing.assert_frame_equal(result, simple_df)
+
+
+# ── align_tokens_with_gaps ────────────────────────────────────────────────────
+
+
+def test_align_identical_sequences():
+    tokens = ["A", "B", "C"]
+    scores = [0.9, 0.8, 0.7]
+    pred, gt, sc = align_tokens_with_gaps(tokens, tokens[:], scores)
+    assert pred == tokens
+    assert gt == tokens
+    assert sc == scores
+
+
+def test_align_output_lengths_equal():
+    pred, gt, sc = align_tokens_with_gaps(
+        predicted=["A", "C"],
+        ground_truth=["A", "B", "C"],
+        scores=[1.0, 1.0],
+    )
+    assert len(pred) == len(gt) == len(sc)
+
+
+def test_align_inserts_gaps_in_predicted():
+    pred, gt, sc = align_tokens_with_gaps(
+        predicted=["A", "C"],
+        ground_truth=["A", "B", "C"],
+        scores=[1.0, 1.0],
+    )
+    assert "-" in pred
+
+
+def test_align_gap_score_is_min_score():
+    pred, gt, sc = align_tokens_with_gaps(
+        predicted=["A"],
+        ground_truth=["A", "B"],
+        scores=[1.0],
+    )
+    gap_scores = [s for s, p in zip(sc, pred) if p == "-"]
+    assert all(s == Constants.min_score for s in gap_scores)
+
+
+def test_align_empty_predicted():
+    pred, gt, sc = align_tokens_with_gaps([], ["A", "B"], [])
+    assert all(p == "-" for p in pred)
+    assert all(s == Constants.min_score for s in sc)
+
+
+def test_align_empty_sequences():
+    pred, gt, sc = align_tokens_with_gaps([], [], [])
+    assert pred == []
+    assert gt == []
+    assert sc == []
+
+
+# ── mutate_row_as_dict ────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def sample_row():
+    return {
+        Constants.predicted_tokens: ["A", "B", "C"],
+        Constants.ground_truth_tokens: ["A", "X", "C"],
+        Constants.aa_scores_column: [0.9, 0.8, 0.7],
+        Constants.aa_idx_column: None,
+    }
+
+
+def test_mutate_row_as_dict_returns_dict(sample_row):
+    result = mutate_row_as_dict(False, sample_row)
+    assert isinstance(result, dict)
+
+
+def test_mutate_row_as_dict_adds_aa_idx(sample_row):
+    result = mutate_row_as_dict(False, sample_row)
+    assert Constants.aa_idx_column in result
+    assert result[Constants.aa_idx_column] == list(
+        range(len(result[Constants.predicted_tokens]))
     )
 
-    # One line added with x=cov, y=prec
-    assert len(g.ax.lines) == 1
-    line = g.ax.lines[0]
-    assert np.allclose(line.get_xdata(), fake_cov)
-    assert np.allclose(line.get_ydata(), fake_prec)
 
-    # Legend label includes AUPC formatted to 3 decimals
-    assert line.get_label() == "ModelX 0.420"
-
-    # Legend exists and uses lower left (hard-coded in code)
-    leg = g.ax.get_legend()
-    assert leg is not None
-    assert [t.get_text() for t in leg.get_texts()] == ["ModelX 0.420"]
+def test_mutate_row_as_dict_aligned_lengths_equal(sample_row):
+    result = mutate_row_as_dict(False, sample_row)
+    n = len(result[Constants.predicted_tokens])
+    assert len(result[Constants.ground_truth_tokens]) == n
+    assert len(result[Constants.aa_scores_column]) == n
+    assert len(result[Constants.aa_idx_column]) == n
 
 
-def test_save_writes_file(tmp_path):
-    g = GraphPrecCov()
-    out = tmp_path / "plot.png"
-
-    g.save(out)
-
-    assert out.exists()
-    assert out.stat().st_size > 0
+# ── calc_precision_coverage ───────────────────────────────────────────────────
 
 
-def test_show_calls_fig_show(monkeypatch):
-    g = GraphPrecCov()
-    called = {"n": 0}
+def test_calc_precision_coverage_output_columns(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    assert Constants.precision_column in result.columns
+    assert Constants.coverage_column in result.columns
+    assert "pc_is_correct" in result.columns
 
-    def fake_show():
-        called["n"] += 1
 
-    monkeypatch.setattr(g.fig, "show", fake_show)
-    g.show()
-    assert called["n"] == 1
+def test_calc_precision_coverage_correctness_flag(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    # sorted descending by score: A(0.9)=correct, B(0.8)=wrong, C(0.7)=correct, D(0.6)=wrong
+    # correctness compares Constants.predicted_tokens against Constants.ground_truth_tokens
+    assert result["pc_is_correct"].to_list() == [True, False, True, False]
+
+
+def test_calc_precision_coverage_precision_range(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    assert all(0.0 <= p <= 1.0 for p in result[Constants.precision_column].to_list())
+
+
+def test_calc_precision_coverage_coverage_range(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    assert all(0.0 <= c <= 1.0 for c in result[Constants.coverage_column].to_list())
+
+
+def test_calc_precision_coverage_ends_at_full_coverage(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    assert result[Constants.coverage_column][-1] == pytest.approx(1.0)
+
+
+def test_calc_precision_coverage_sorted_descending(pc_input_df):
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    scores = result[Constants.pep_score_column].to_list()
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_calc_precision_coverage_all_correct():
+    df = pl.DataFrame(
+        {
+            Constants.predicted_tokens: ["A", "B", "C"],
+            Constants.ground_truth_tokens: ["A", "B", "C"],
+            Constants.pep_score_column: [0.9, 0.8, 0.7],
+            Constants.aa_scores_column: ["", "", ""],
+        }
+    )
+    result = calc_precision_coverage(df, Constants.pep_score_column)
+    assert all(
+        p == pytest.approx(1.0) for p in result[Constants.precision_column].to_list()
+    )
+
+
+def test_calc_precision_coverage_all_wrong():
+    df = pl.DataFrame(
+        {
+            Constants.predicted_tokens: ["A", "B", "C"],
+            Constants.ground_truth_tokens: ["X", "Y", "Z"],
+            Constants.pep_score_column: [0.9, 0.8, 0.7],
+            Constants.aa_scores_column: ["", "", ""],
+        }
+    )
+    result = calc_precision_coverage(df, Constants.pep_score_column)
+    assert all(
+        p == pytest.approx(0.0) for p in result[Constants.precision_column].to_list()
+    )
