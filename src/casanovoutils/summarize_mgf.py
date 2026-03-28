@@ -286,6 +286,22 @@ def charge_distribution(
 # ---------------------------------------------------------------------------
 
 
+def count_peaks(spectra: Iterable) -> list[int]:
+    """Return the number of peaks for each spectrum.
+
+    Parameters
+    ----------
+    spectra : Iterable
+        Iterable of pyteomics spectrum dicts.
+
+    Returns
+    -------
+    list[int]
+        Peak count for each spectrum, in input order.
+    """
+    return [len(s["m/z array"]) for s in spectra]
+
+
 def peak_counts(
     mgf_file: PathLike,
     output_tsv: PathLike = "peak_counts.tsv",
