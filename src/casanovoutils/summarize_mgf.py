@@ -59,6 +59,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 # isort: on
 import numpy as np
+
+from .denovoutils import get_mgf_psms_df, process_spectrum
 try:
     from lark.exceptions import LarkError
     from pyteomics import mgf, proforma as pyteomics_proforma
@@ -284,11 +286,6 @@ def charge_distribution(
 # ---------------------------------------------------------------------------
 
 
-def count_peaks(spectra: Iterable) -> list[int]:
-    """Return number of peaks per spectrum."""
-    return [len(spectrum["m/z array"]) for spectrum in spectra]
-
-
 def peak_counts(
     mgf_file: PathLike,
     output_tsv: PathLike = "peak_counts.tsv",
@@ -305,11 +302,9 @@ def peak_counts(
     output_plot : PathLike
         Output histogram path (default: peak_counts.png).
     """
-    with mgf.MGF(mgf_file) as reader:
-        counts_list = count_peaks(reader)
-
-    counts_map = Counter(counts_list)
-    total = len(counts_list)
+    df = get_mgf_psms_df(mgf_file)
+    counts_map = Counter(df["mgf_n_peaks"].to_list())
+    total = len(df)
     print(f"Processed {total} spectra total.", file=sys.stderr)
 
     # -- TSV output (sorted by n_peaks) ----------------------------------------
@@ -321,13 +316,13 @@ def peak_counts(
     print(f"Wrote {output_tsv}", file=sys.stderr)
 
     # -- Histogram ------------------------------------------------------------
-    if counts_list:
-        arr = np.array(counts_list)
+    if counts_map:
+        arr = np.array(df["mgf_n_peaks"].to_list())
         title = (
             f"Peaks per spectrum (n={total:,}, median={int(np.median(arr))})"
         )
         fig = _make_histogram_fig(
-            counts_list,
+            arr,
             xlabel="Number of peaks",
             title=title,
         )
@@ -424,7 +419,6 @@ def peptide_lengths(
 # ---------------------------------------------------------------------------
 
 _CHUNK_SIZE = 500
-
 
 def _annotate_chunk(args):
     """Annotate a chunk of spectra for fragment coverage.
@@ -682,8 +676,8 @@ def _compute_coverage_results(
 
 def fragment_coverage(
     mgf_file,
-    tolerance=10.0,
-    tolerance_unit="ppm",
+    tolerance=0.05,
+    tolerance_unit="Da",
     output_tsv="fragment_coverage.tsv",
     output_full_tsv="fragment_coverage.full.tsv",
     output_plot="fragment_coverage.png",
@@ -786,8 +780,8 @@ def _build_summary_html(
     coverage_png: str | None,
     coverage_stats: dict | None,
     mod_counts: Counter | None = None,
-    tolerance: float = 10.0,
-    tolerance_unit: str = "ppm",
+    tolerance: float = 0.05,
+    tolerance_unit: str = "Da",
     max_charge: str = "1less",
     neutral_losses: bool = True,
 ) -> str:
@@ -965,8 +959,8 @@ class _Tee:
 def summarize_mgf(
     mgf_file: PathLike,
     output_root: PathLike = "mgf_summary",
-    tolerance: float = 10.0,
-    tolerance_unit: str = "ppm",
+    tolerance: float = 0.05,
+    tolerance_unit: str = "Da",
     workers: int = 1,
     max_charge: str = "1less",
     neutral_losses: bool = True,
@@ -1025,13 +1019,13 @@ def summarize_mgf(
             with mgf.MGF(mgf_file) as reader:
                 for spectrum_data in reader:
                     total_spectra += 1
-                    if total_spectra % 10000 == 0:
+                    if total_spectra % 1000 == 0:
                         print(
                             f"  {total_spectra:,} spectra loaded ...",
                             file=sys.stderr,
                         )
 
-                    params = spectrum_data["params"]
+                    params = process_spectrum(spectrum_data)
 
                     # Charge distribution
                     charge = _parse_single_charge(params.get("charge", []))
@@ -1039,7 +1033,7 @@ def summarize_mgf(
                         charge_counts[charge] += 1
 
                     # Peak counts
-                    n_peaks = len(spectrum_data["m/z array"])
+                    n_peaks = params["n_peaks"]
                     peak_counts_counter[n_peaks] += 1
 
                     # Sequence-based analyses (length + modifications — no annotation)
@@ -1260,6 +1254,15 @@ def summarize_mgf(
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
+
+
+COMMANDS = {
+    "summarize": summarize_mgf,
+    "charge-distribution": charge_distribution,
+    "fragment-coverage": fragment_coverage,
+    "peak-counts": peak_counts,
+    "peptide-lengths": peptide_lengths,
+}
 
 
 def charge_distribution_main() -> None:

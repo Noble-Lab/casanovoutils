@@ -11,15 +11,21 @@ The top-level structure is:
 
 ```text
 casanovoutils
-├── mgf          — MGF file processing
+├── mgf              — MGF file processing
 │   ├── pipeline
 │   ├── shuffle
 │   ├── downsample
 │   └── purge-redundant
-├── denovo       — Load and join PSM data
+├── denovo           — Load and join PSM data
 │   ├── get_mgf_psms
 │   ├── get_mztab
 │   └── get_groundtruth
+├── summarize-mgf    — MGF quality control and reporting
+│   ├── summarize
+│   ├── charge-distribution
+│   ├── peak-counts
+│   ├── peptide-lengths
+│   └── fragment-coverage
 └── dump-residues
     └── dump
 ```
@@ -175,6 +181,127 @@ Join MGF PSM metadata with mzTab predictions into a single DataFrame.
 ```bash
 casanovoutils denovo get_groundtruth input.mgf results.mztab \
   --out_path groundtruth.parquet
+```
+
+---
+
+## `casanovoutils summarize-mgf`
+
+Compute quality-control statistics for an MGF file and produce TSV tables,
+PNG plots, and an HTML report.
+
+### `summarize`
+
+Run all QC analyses in a single streaming pass and write a self-contained
+HTML report, TSV tables, and PNG plots to an output directory. A log file
+is also written alongside the HTML.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file |
+| `--output_root` | path | `mgf_summary` | Output directory; the HTML and log share its basename |
+| `--tolerance` | float | `0.05` | Fragment mass tolerance for coverage calculation |
+| `--tolerance_unit` | str | `Da` | Tolerance unit: `ppm` or `Da` |
+
+**Outputs** (all written inside `output_root/`):
+
+| File | Description |
+| --- | --- |
+| `<stem>.html` | HTML report with embedded tables and linked plots |
+| `<stem>.log` | Copy of all progress messages |
+| `charge_distribution.tsv` | Charge state counts |
+| `peak_counts.tsv` | Peak count histogram data |
+| `peptide_lengths.tsv` | Peptide length histogram data (annotated spectra only) |
+| `fragment_coverage.tsv` | Per-spectrum fragment ion coverage (annotated spectra only) |
+| `charge_distribution.png` | Bar chart of charge state distribution |
+| `peak_counts.png` | Histogram of peaks per spectrum |
+| `peptide_lengths.png` | Histogram of peptide lengths |
+| `fragment_coverage.png` | Histogram of fragment ion coverage proportions |
+
+**Example:**
+
+```bash
+casanovoutils summarize-mgf summarize input.mgf --output_root input_qc/
+```
+
+---
+
+### `charge-distribution`
+
+Compute the precursor charge state distribution and write a TSV table and
+bar chart.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file |
+| `--output_tsv` | path | `charge_distribution.tsv` | Output TSV path |
+| `--output_plot` | path | `charge_distribution.png` | Output bar chart path |
+
+**Example:**
+
+```bash
+casanovoutils summarize-mgf charge-distribution input.mgf \
+  --output_tsv charge.tsv --output_plot charge.png
+```
+
+---
+
+### `peak-counts`
+
+Count the number of peaks per spectrum and write a TSV table and histogram.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file |
+| `--output_tsv` | path | `peak_counts.tsv` | Output TSV path |
+| `--output_plot` | path | `peak_counts.png` | Output histogram path |
+
+**Example:**
+
+```bash
+casanovoutils summarize-mgf peak-counts input.mgf
+```
+
+---
+
+### `peptide-lengths`
+
+Measure peptide lengths for annotated spectra (requires `SEQ=` in ProForma
+notation) and write a TSV table and histogram.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file |
+| `--output_tsv` | path | `peptide_lengths.tsv` | Output TSV path |
+| `--output_plot` | path | `peptide_lengths.png` | Output histogram path |
+
+**Example:**
+
+```bash
+casanovoutils summarize-mgf peptide-lengths input.mgf
+```
+
+---
+
+### `fragment-coverage`
+
+Compute the proportion of total fragment ion intensity explained by b- and
+y-ions for each annotated spectrum, and write two TSV tables and a histogram.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file (requires `SEQ=` in ProForma notation) |
+| `--tolerance` | float | `0.05` | Fragment mass tolerance |
+| `--tolerance_unit` | str | `Da` | Tolerance unit: `ppm` or `Da` |
+| `--output_tsv` | path | `fragment_coverage.tsv` | Output TSV sorted by coverage |
+| `--output_full_tsv` | path | `fragment_coverage.full.tsv` | Output TSV in input order |
+| `--output_plot` | path | `fragment_coverage.png` | Output histogram path |
+
+**Example:**
+
+```bash
+casanovoutils summarize-mgf fragment-coverage input.mgf \
+  --tolerance 0.02 --tolerance_unit Da
 ```
 
 ---
