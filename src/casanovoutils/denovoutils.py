@@ -415,10 +415,10 @@ def get_ground_truth_df(
     logging.info("Building merged groundtruth DataFrame")
     if not isinstance(mgf_path, list):
         mgf_path = [mgf_path]
-    
+
     if not mgf_path:
         raise ValueError("Need at least one path")
-    
+
     mgf_dfs = []
     for path in mgf_path:
         mgf_dfs.append(get_mgf_psms_df(path))
@@ -433,9 +433,7 @@ def get_ground_truth_df(
         index_exprs.append(
             pl.when(pl.col("mztab_spectra_ref").str.starts_with(prefix))
             .then(
-                pl.col("mztab_spectra_ref")
-                .str.slice(len(prefix))
-                .cast(pl.Int64)
+                pl.col("mztab_spectra_ref").str.slice(len(prefix)).cast(pl.Int64)
                 + offset
             )
             .otherwise(pl.col("tmp_mgf_idx"))
