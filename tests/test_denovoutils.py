@@ -202,6 +202,23 @@ def test_process_spectrum_meta_data_only_default_is_true():
     assert "intensity_array" not in result
 
 
+def test_get_ground_truth_df_list_run2_joins_second_file(mgf_df1, mgf_df2):
+    """ms_run[2]:index=N uses the global concat index, so N=2 maps to mgf_df2's first row."""
+    mztab = pl.DataFrame(
+        {
+            "mztab_spectra_ref": [
+                "ms_run[1]:index=0",
+                "ms_run[1]:index=1",
+                "ms_run[2]:index=0",
+            ],
+            "mztab_sequence": ["PEPTIDE", "ANOTHER", "THIRD"],
+        }
+    )
+    result = get_ground_truth_df([mgf_df1, mgf_df2], mztab)
+    # The row whose title is "spec3" (from mgf_df2) should be joined with "THIRD"
+    row = result.filter(pl.col("mgf_title") == "spec3")
+    assert row["mztab_sequence"][0] == "THIRD"
+
 def test_get_mgf_psms_df_passthrough_ignores_meta_data_only(simple_df):
     """When a DataFrame is passed directly, meta_data_only has no effect."""
     result = get_mgf_psms_df(simple_df, meta_data_only=False)
