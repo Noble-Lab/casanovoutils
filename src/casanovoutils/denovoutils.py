@@ -28,9 +28,8 @@ import tqdm
 
 from . import configure_logging
 from .residues import get_residues
-from .types import CommandDict
+from .types import CommandDict, PyteomicsSpectrum
 
-PyteomicsSpectrum = dict[str, dict[str, Any] | list[Any]]
 DfPath = PathLike | pl.DataFrame
 
 
@@ -386,7 +385,7 @@ def get_mztab_df(
 
 
 def get_ground_truth_df(
-    mgf_path: DfPath,
+    mgf_path: DfPath | list[DfPath],
     mztab_path: DfPath,
     out_path: Optional[PathLike] = None,
 ) -> pl.DataFrame:
@@ -399,7 +398,7 @@ def get_ground_truth_df(
 
     Parameters
     ----------
-    mgf_path : PathLike
+    mgf_path : PathLike or list of PathLike
         Path to the MGF file, or an already-loaded :class:`polars.DataFrame`.
     mztab_path : PathLike
         Path to the mzTab file, or an already-loaded :class:`polars.DataFrame`.
@@ -414,17 +413,40 @@ def get_ground_truth_df(
         left-joined with mzTab annotation columns (prefixed ``mztab_``).
     """
     logging.info("Building merged groundtruth DataFrame")
-    mgf_df = get_mgf_psms_df(mgf_path)
-    mgf_df = mgf_df.with_row_index("tmp_mgf_idx")
+    if not isinstance(mgf_path, list):
+        mgf_path = [mgf_path]
+    
+    if not mgf_path:
+        raise ValueError("Need at least one path")
+    
+    mgf_dfs = []
+    for path in mgf_path:
+        mgf_dfs.append(get_mgf_psms_df(path))
 
-    index_fun = lambda x: int(x[len("ms_run[1]:index=") :])
-    index_expr = (
-        pl.col("mztab_spectra_ref")
-        .map_elements(index_fun, return_dtype=pl.Int64)
-        .alias("tmp_mgf_idx")
-    )
+    mgf_df = pl.concat(mgf_dfs).with_row_index("tmp_mgf_idx")
 
-    mztab_df = get_mztab_df(mztab_path).with_columns(index_expr)
+    index_exprs = []
+    cumulative_offset = 0
+    for i in range(len(mgf_path)):
+        prefix = f"ms_run[{i + 1}]:index="
+        offset = cumulative_offset
+        index_exprs.append(
+            pl.when(pl.col("mztab_spectra_ref").str.starts_with(prefix))
+            .then(
+                pl.col("mztab_spectra_ref")
+                .str.slice(len(prefix))
+                .cast(pl.Int64)
+                + offset
+            )
+            .otherwise(pl.col("tmp_mgf_idx"))
+            .alias("tmp_mgf_idx")
+        )
+        cumulative_offset += len(mgf_dfs[i])
+
+    mztab_df = get_mztab_df(mztab_path)
+    mztab_df = mztab_df.with_columns(pl.lit(None).cast(pl.Int64).alias("tmp_mgf_idx"))
+    for index_expr in index_exprs:
+        mztab_df = mztab_df.with_columns(index_expr)
 
     logging.debug(
         "Joining MGF (%d rows) with mzTab (%d rows)", len(mgf_df), len(mztab_df)
