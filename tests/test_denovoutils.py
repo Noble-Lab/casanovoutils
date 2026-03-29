@@ -106,6 +106,24 @@ def mgf_df():
         }
     )
 
+@pytest.fixture
+def mgf_df1():
+    return pl.DataFrame(
+        {
+            "mgf_title": ["spec1", "spec2"],
+            "mgf_n_peaks": [10, 20],
+        }
+    )
+
+
+@pytest.fixture
+def mgf_df2():
+    return pl.DataFrame(
+        {
+            "mgf_title": ["spec3"],
+            "mgf_n_peaks": [30],
+        }
+    )
 
 @pytest.fixture
 def mztab_df():
