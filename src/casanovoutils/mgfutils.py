@@ -21,7 +21,7 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
-from .types import CommandDict, PyteomicsSpectrum
+from .types import Commands, PyteomicsSpectrum
 
 SpectraInput = PathLike | Iterable[PathLike] | Iterable[PyteomicsSpectrum]
 
@@ -164,9 +164,51 @@ def downsample(
     return result
 
 
+def remove_redundant_peaks(
+    spectrum: PyteomicsSpectrum, eps: float
+) -> PyteomicsSpectrum:
+    """
+    Remove redundant peaks that are too close together along the m/z axis.
+
+    Peaks are sorted by m/z. Any peak within ``eps`` of the preceding peak
+    is discarded, keeping the first peak in each run of close peaks.
+
+    Parameters
+    ----------
+    spectrum : PyteomicsSpectrum
+        A spectrum dict as returned by ``pyteomics.mgf.read``, containing
+        ``"m/z array"`` and ``"intensity array"`` keys.
+    eps : float, optional
+        Maximum m/z distance between two peaks to be considered redundant.
+        Defaults to the 32-bit float machine epsilon
+        (``numpy.finfo(numpy.float32).eps`` ≈ 1.19e-7).
+
+    Returns
+    -------
+    PyteomicsSpectrum
+        A new spectrum dict with ``"m/z array"`` and ``"intensity array"``
+        replaced by the deduplicated arrays. All other keys are unchanged.
+    """
+    mz = np.asarray(spectrum["m/z array"])
+    intensity = np.asarray(spectrum["intensity array"])
+
+    order = np.argsort(mz)
+    mz = mz[order]
+    intensity = intensity[order]
+    keep = np.concatenate([[True], np.diff(mz) >= eps])
+
+    logging.debug(
+        "Removed %d redundant peaks from spectrum %s",
+        len(mz) - np.sum(keep),
+        spectrum.get("title", "UNKNOWN SPECTRUM"),
+    )
+
+    return {**spectrum, "m/z array": mz[keep], "intensity array": intensity[keep]}
+
+
 def purge_redundant(
     spectra: SpectraInput,
-    epsilon: float = 0.001,
+    epsilon: float = np.finfo(np.float32).eps,
     outfile: Optional[PathLike] = None,
 ) -> list[PyteomicsSpectrum]:
     """
@@ -180,7 +222,7 @@ def purge_redundant(
     ----------
     spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
         Spectrum source — see :func:`iter_spectra` for accepted types.
-    epsilon : float, default=0.001
+    epsilon : float
         Minimum m/z separation (in daltons) required to keep a peak.
     outfile : PathLike, optional
         If provided, write the purged spectra to this MGF file path.
@@ -191,39 +233,13 @@ def purge_redundant(
         Spectra with redundant peaks removed and peaks sorted by m/z.
     """
     configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
-
     logging.info("Purging redundant peaks with epsilon=%g Da", epsilon)
-    result = []
-    peaks_before = 0
-    peaks_after = 0
-    for spectrum in iter_spectra(spectra, desc="Purging redundant peaks"):
-        mz = spectrum["m/z array"]
-        intensity = spectrum["intensity array"]
+    spectra = iter_spectra(spectra, desc="Purging redundant peaks")
+    spectra = map(lambda s: remove_redundant_peaks(s, epsilon), spectra)
+    spectra = list(spectra)
+    write_spectra(spectra, outfile)
 
-        sort_idx = np.argsort(mz)
-        mz = mz[sort_idx]
-        intensity = intensity[sort_idx]
-
-        mask = np.concatenate(([True], np.diff(mz) >= epsilon))
-        peaks_before += len(mz)
-        peaks_after += mask.sum()
-
-        result.append(
-            {
-                **spectrum,
-                "m/z array": mz[mask],
-                "intensity array": intensity[mask],
-            }
-        )
-
-    logging.info(
-        "Purged %d -> %d peaks across %d spectra",
-        peaks_before,
-        peaks_after,
-        len(result),
-    )
-    write_spectra(result, outfile)
-    return result
+    return spectra
 
 
 def shuffle(
@@ -326,7 +342,7 @@ def pipeline(
     return result
 
 
-COMMANDS: CommandDict = {
+COMMANDS: Commands = {
     "pipeline": pipeline,
     "shuffle": shuffle,
     "downsample": downsample,

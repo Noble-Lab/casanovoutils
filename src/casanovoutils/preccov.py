@@ -42,6 +42,7 @@ from .denovoutils import (
     tokenize_sequences,
     write_dataframe,
 )
+from .types import Commands
 
 
 @dataclasses.dataclass
@@ -668,10 +669,16 @@ def graph_prec_cov(*pc_df_paths: PathLike, out_path: Optional[PathLike] = None) 
         )
 
 
+COMMANDS: Commands = {
+    "get_pc_df": get_prec_cov_df,
+    "graph_prec_cov": graph_prec_cov,
+}
+
+
 def main() -> None:
     """CLI entry"""
     configure_logging()
-    fire.Fire({"get_pc_df": get_prec_cov_df, "graph_prec_cov": graph_prec_cov})
+    fire.Fire(COMMANDS)
 
 
 if __name__ == "__main__":

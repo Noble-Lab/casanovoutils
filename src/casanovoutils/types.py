@@ -2,7 +2,7 @@
 Shared type aliases used across the package.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 PyteomicsSpectrum = list[dict[str, Any]]
-CommandDict = dict[str, Callable]
+Commands = dict[str, Callable] | Callable | Iterable[Callable]

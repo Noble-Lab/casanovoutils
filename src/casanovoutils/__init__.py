@@ -7,12 +7,16 @@ alignment, and residue mass vocabulary management. Exposes
 """
 
 import logging
+import os
 import sys
 from os import PathLike
 from typing import Optional
 
 
-def configure_logging(log_file: Optional[PathLike] = None) -> None:
+def configure_logging(
+    log_file: Optional[PathLike] = None,
+    level: Optional[int] = None,
+) -> None:
     """
     Configure logging to stdout, optionally also writing to a file.
 
@@ -24,16 +28,21 @@ def configure_logging(log_file: Optional[PathLike] = None) -> None:
         If provided, log output is written to this file in addition to stdout.
         The file is opened in append mode. If ``None`` (default), only stdout
         is used.
+    level : int, optional
+        Logging level. If ``None`` (default), reads from the ``LOG_LEVEL``
+        environment variable. If that is not set, defaults to ``logging.INFO``.
     """
     if logging.root.handlers:
         return
 
+    level = os.environ.get("LOG_LEVEL", logging.INFO) if level is None else level
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
     if log_file is not None:
         handlers.append(logging.FileHandler(log_file))
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s | %(levelname)s | %(message)s",
         handlers=handlers,
     )
