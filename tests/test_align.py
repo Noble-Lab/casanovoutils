@@ -19,7 +19,6 @@ from casanovoutils.constants import Constants
 
 
 class TestGetAlignedDpArray:
-
     def test_returns_correct_shape(self):
         short = ["A", "B"]
         long = ["A", "X", "B"]
@@ -64,7 +63,6 @@ class TestGetAlignedDpArray:
 
 
 class TestRecoverSolution:
-
     def _align(self, short, long, tie_break_suffix=True):
         dp = get_aligned_dp_array(short, long)
         return recover_solution(dp, short, long, "-", tie_break_suffix)
@@ -179,7 +177,6 @@ class TestRecoverSolution:
 
 
 class TestAlignScores:
-
     def test_gap_positions_get_min_score(self):
         predicted = ["A", "-", "B"]
         scores = [0.9, 0.8]
@@ -218,7 +215,6 @@ class TestAlignScores:
 
 
 class TestAlignTokensWithGaps:
-
     def test_empty_predicted_returns_all_gaps(self):
         predicted, ground_truth, scores = align_tokens_with_gaps(
             [], ["A", "B", "C"], []
