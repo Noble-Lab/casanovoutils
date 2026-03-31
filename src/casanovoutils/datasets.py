@@ -11,7 +11,7 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
-from .types import CommandDict
+from .types import Commands
 
 # Number of spectra to buffer per output file before flushing to disk.
 _WRITE_BUFFER_SIZE = 1000
@@ -526,7 +526,7 @@ def create_datasets(
             logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
 
 
-COMMANDS: CommandDict = {"create-splits": create_datasets}
+COMMANDS: Commands = create_datasets
 
 
 def main() -> None:
