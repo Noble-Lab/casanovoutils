@@ -22,7 +22,7 @@ import fire
 import matplotlib.pyplot as plt
 
 from . import configure_logging
-from .types import CommandDict
+from .types import Commands
 
 LossSeries: TypeAlias = list[tuple[int, float]]
 
@@ -277,9 +277,7 @@ def plot(
     plot_losses(root, train_loss_lists, val_loss_lists, max_y)
 
 
-COMMANDS: CommandDict = {
-    "plot": plot,
-}
+COMMANDS: Commands = plot
 
 
 def main() -> None:

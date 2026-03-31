@@ -26,7 +26,7 @@ uv sync --group dev
 ## Running the tests
 
 ```bash
-pytest tests/
+uv run pytest tests/
 ```
 
 ## Code style
@@ -36,8 +36,8 @@ casanovoutils uses [black](https://black.readthedocs.io/) for formatting and
 submitting a pull request, please run:
 
 ```bash
-black src/ tests/
-isort src/ tests/
+uv run isort src/ tests/
+uv run black src/ tests/
 ```
 
 ## Submitting a pull request

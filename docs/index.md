@@ -1,6 +1,6 @@
 # casanovoutils
 
-**casanovoutils** is an open-source collection of command-line utilities for
+**casanovoutils** is an open-source collection of python and command-line utilities for
 evaluating, visualizing, and manipulating peptide-spectrum match (PSM) data.
 It is designed to complement [Casanovo](https://casanovo.readthedocs.io/), the
 state-of-the-art de novo peptide sequencing tool, and works directly with

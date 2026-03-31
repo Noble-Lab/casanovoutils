@@ -10,7 +10,7 @@ from typing import Optional
 import fire
 import yaml
 
-from .types import CommandDict
+from .types import Commands
 
 
 def get_residues(residues_path: Optional[PathLike] = None) -> dict[str, float]:
@@ -56,7 +56,7 @@ def dump_residues(destination_path: PathLike) -> None:
     shutil.copy(residues_path, destination_path)
 
 
-COMMANDS: CommandDict = {"dump": dump_residues}
+COMMANDS: Commands = dump_residues
 
 
 def main() -> None:
