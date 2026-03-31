@@ -11,6 +11,7 @@ from .datasets import COMMANDS as dataset_commands
 from .denovoutils import COMMANDS as denovo_commands
 from .graphloss import COMMANDS as loss_commands
 from .mgfutils import COMMANDS as mgf_commands
+from .preccov import COMMANDS as preccov_commands
 from .residues import COMMANDS as residue_commands
 from .types import CommandDict
 
@@ -20,6 +21,7 @@ COMMANDS: CommandDict = {
     "dump-residues": residue_commands,
     "graph-loss": loss_commands,
     "datasets": dataset_commands,
+    "prec-cov": preccov_commands,
 }
 
 
