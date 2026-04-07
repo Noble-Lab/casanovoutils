@@ -342,10 +342,171 @@ def pipeline(
     return result
 
 
+_VALID_DOWNSAMPLE_TYPES = frozenset({"number", "proportion"})
+
+
+def spectra_per_peptide(
+    spectra: SpectraInput,
+    k: int = 1,
+    outfile: Optional[PathLike] = None,
+    random_seed: int = 42,
+) -> list[PyteomicsSpectrum]:
+    """
+    Sample up to k spectra per peptide using reservoir sampling.
+
+    Makes a single streaming pass through *spectra*, maintaining a reservoir
+    of size k per unique peptide sequence.  For the j-th occurrence of a
+    peptide: if j <= k, add unconditionally; if j > k, replace a uniformly
+    random reservoir slot with probability k/j.  Memory usage is
+    O(unique peptides × k) rather than O(total spectra).
+
+    Parameters
+    ----------
+    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
+        Spectrum source — see :func:`iter_spectra` for accepted types.
+    k : int, default=1
+        Maximum number of spectra to retain per peptide sequence.
+    outfile : PathLike, optional
+        If provided, write the sampled spectra to this MGF file path.
+    random_seed : int, default=42
+        Seed for the local random number generator.
+
+    Returns
+    -------
+    list[PyteomicsSpectrum]
+        Sampled spectra, grouped by peptide in first-seen order.
+    """
+    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
+    logging.info(
+        "Sampling up to k=%d spectra per peptide (random_seed=%d)", k, random_seed
+    )
+
+    rng = random.Random(random_seed)
+    reservoir: dict[str, list[PyteomicsSpectrum]] = {}
+    counts: dict[str, int] = {}
+
+    for spectrum in iter_spectra(spectra, desc="Streaming spectra"):
+        seq = spectrum["params"]["seq"]
+        count = counts.get(seq, 0) + 1
+        counts[seq] = count
+        if count <= k:
+            reservoir.setdefault(seq, []).append(spectrum)
+        else:
+            j = rng.randint(0, count - 1)
+            if j < k:
+                reservoir[seq][j] = spectrum
+
+    result = list(itertools.chain.from_iterable(reservoir.values()))
+    logging.info(
+        "Retained %d spectra from %d unique peptides", len(result), len(reservoir)
+    )
+    write_spectra(result, outfile)
+    return result
+
+
+def downsample_spectra(
+    input_file: PathLike,
+    output_file: PathLike,
+    downsample_type: str = "number",
+    downsample_rate: float = 100,
+    random_seed: int = 42,
+) -> None:
+    """
+    Downsample an MGF file to a target number or proportion of spectra.
+
+    Makes two streaming passes: the first counts total spectra, the second
+    streams with an adaptive acceptance probability (needed/remaining) that
+    guarantees exactly k spectra are written.
+
+    Parameters
+    ----------
+    input_file : PathLike
+        Path to the input MGF file.
+    output_file : PathLike
+        Path for the downsampled output MGF file.  Must differ from
+        *input_file*.
+    downsample_type : str, default ``"number"``
+        One of ``"number"`` (retain exactly *downsample_rate* spectra) or
+        ``"proportion"`` (retain exactly ``round(total × downsample_rate)``).
+    downsample_rate : float, default 100
+        Target rate.  Positive integer for ``"number"``; in ``(0, 1]`` for
+        ``"proportion"``.
+    random_seed : int, default 42
+        Seed for the random number generator.
+    """
+    configure_logging(pathlib.Path(output_file).with_suffix(".log"))
+
+    if pathlib.Path(input_file).resolve() == pathlib.Path(output_file).resolve():
+        raise ValueError(
+            "input_file and output_file must be different paths; "
+            "overwriting the input in-place is not supported."
+        )
+
+    if downsample_type not in _VALID_DOWNSAMPLE_TYPES:
+        raise ValueError(
+            f"--downsample-type must be one of {sorted(_VALID_DOWNSAMPLE_TYPES)}, "
+            f"got {downsample_type!r}."
+        )
+
+    if downsample_type == "number":
+        if (
+            not np.isfinite(downsample_rate)
+            or downsample_rate != int(downsample_rate)
+            or int(downsample_rate) < 1
+        ):
+            raise ValueError(
+                "--downsample-rate must be a positive integer when "
+                f"--downsample-type is 'number', got {downsample_rate!r}."
+            )
+    else:
+        if not (0 < downsample_rate <= 1):
+            raise ValueError(
+                "--downsample-rate must be in (0, 1] when "
+                f"--downsample-type is '{downsample_type}', "
+                f"got {downsample_rate!r}."
+            )
+
+    rng = random.Random(random_seed)
+
+    # First pass: count total spectra.
+    with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
+        n = sum(
+            1 for _ in tqdm.tqdm(reader, desc="Counting spectra", unit="spectrum")
+        )
+
+    if downsample_type == "number":
+        k = min(int(downsample_rate), n)
+    else:
+        k = min(round(n * downsample_rate), n)
+
+    pct = k / n if n > 0 else 0.0
+    logging.info("Targeting %d of %d spectra (%.1f%%)", k, n, 100 * pct)
+
+    # Second pass: stream with adaptive acceptance probability.
+    needed = k
+    remaining = n
+
+    def _filtered():
+        nonlocal needed, remaining
+        with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
+            for spectrum in tqdm.tqdm(
+                reader, desc="Streaming spectra", unit="spectrum"
+            ):
+                if needed > 0 and rng.random() < needed / remaining:
+                    needed -= 1
+                    yield spectrum
+                remaining -= 1
+
+    pyteomics.mgf.write(_filtered(), output=str(output_file))
+    logging.info("Done writing %s", output_file)
+
+
 COMMANDS: Commands = {
     "pipeline": pipeline,
     "shuffle": shuffle,
     "downsample": downsample,
+    "spectra-per-peptide": spectra_per_peptide,
+    "downsample-spectra": downsample_spectra,
     "purge-redundant": purge_redundant,
 }
 

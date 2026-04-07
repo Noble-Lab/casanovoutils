@@ -1,13 +1,17 @@
 import numpy as np
 import pytest
 
+import pyteomics.mgf
+
 from casanovoutils.mgfutils import (
     downsample,
+    downsample_spectra,
     get_pep_dict_mgf,
     iter_spectra,
     pipeline,
     purge_redundant,
     shuffle,
+    spectra_per_peptide,
     write_spectra,
 )
 
@@ -257,3 +261,144 @@ def test_pipeline_writes_file(tmp_path):
     outfile = tmp_path / "out.mgf"
     pipeline(spectra, outfile=outfile, do_shuffle=False)
     assert outfile.exists()
+
+
+# ---------------------------------------------------------------------------
+# spectra_per_peptide
+# ---------------------------------------------------------------------------
+
+
+def test_spp_k1_limits_to_one_per_peptide():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(5)] + [
+        make_spectrum("BBB", [float(i)], [1.0]) for i in range(3)
+    ]
+    result = spectra_per_peptide(spectra, k=1)
+    seqs = [s["params"]["seq"] for s in result]
+    assert seqs.count("AAA") == 1
+    assert seqs.count("BBB") == 1
+
+
+def test_spp_k_greater_than_max_keeps_all():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(3)] + [
+        make_spectrum("BBB", [float(i)], [1.0]) for i in range(2)
+    ]
+    result = spectra_per_peptide(spectra, k=100)
+    assert len(result) == 5
+
+
+def test_spp_k_limits_per_peptide():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(5)] + [
+        make_spectrum("BBB", [float(i)], [1.0]) for i in range(4)
+    ]
+    result = spectra_per_peptide(spectra, k=2)
+    seqs = [s["params"]["seq"] for s in result]
+    assert seqs.count("AAA") == 2
+    assert seqs.count("BBB") == 2
+
+
+def test_spp_reproducible():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(10)] + [
+        make_spectrum("BBB", [float(i)], [1.0]) for i in range(10)
+    ]
+    r1 = spectra_per_peptide(list(spectra), k=3, random_seed=123)
+    r2 = spectra_per_peptide(list(spectra), k=3, random_seed=123)
+    assert [s["m/z array"][0] for s in r1] == [s["m/z array"][0] for s in r2]
+
+
+def test_spp_different_seeds_differ():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(20)]
+    r1 = spectra_per_peptide(list(spectra), k=5, random_seed=1)
+    r2 = spectra_per_peptide(list(spectra), k=5, random_seed=99)
+    assert [s["m/z array"][0] for s in r1] != [s["m/z array"][0] for s in r2]
+
+
+def test_spp_accepts_generator():
+    def _gen():
+        for i in range(3):
+            yield make_spectrum("AAA", [float(i)], [1.0])
+
+    result = spectra_per_peptide(_gen(), k=1)
+    assert len(result) == 1
+    assert result[0]["params"]["seq"] == "AAA"
+
+
+# ---------------------------------------------------------------------------
+# downsample_spectra
+# ---------------------------------------------------------------------------
+
+
+def _write_mgf_file(path, spectra):
+    pyteomics.mgf.write(spectra, output=str(path))
+    return path
+
+
+def _count_mgf(path):
+    with pyteomics.mgf.read(str(path), use_index=False) as r:
+        return sum(1 for _ in r)
+
+
+def test_ds_number_exact_count(tmp_path):
+    inp = _write_mgf_file(
+        tmp_path / "in.mgf",
+        [make_spectrum("P", [float(i)], [1.0]) for i in range(20)],
+    )
+    out = tmp_path / "out.mgf"
+    downsample_spectra(inp, out, downsample_type="number", downsample_rate=5)
+    assert _count_mgf(out) == 5
+
+
+def test_ds_number_larger_than_total_keeps_all(tmp_path):
+    inp = _write_mgf_file(
+        tmp_path / "in.mgf",
+        [make_spectrum("P", [float(i)], [1.0]) for i in range(10)],
+    )
+    out = tmp_path / "out.mgf"
+    downsample_spectra(inp, out, downsample_type="number", downsample_rate=100)
+    assert _count_mgf(out) == 10
+
+
+def test_ds_proportion_exact_count(tmp_path):
+    inp = _write_mgf_file(
+        tmp_path / "in.mgf",
+        [make_spectrum("P", [float(i)], [1.0]) for i in range(20)],
+    )
+    out = tmp_path / "out.mgf"
+    downsample_spectra(inp, out, downsample_type="proportion", downsample_rate=0.5)
+    assert _count_mgf(out) == 10
+
+
+def test_ds_reproducible(tmp_path):
+    inp = _write_mgf_file(
+        tmp_path / "in.mgf",
+        [make_spectrum("P", [float(i)], [1.0]) for i in range(50)],
+    )
+    out1 = tmp_path / "out1.mgf"
+    out2 = tmp_path / "out2.mgf"
+    downsample_spectra(inp, out1, downsample_type="number", downsample_rate=20, random_seed=7)
+    downsample_spectra(inp, out2, downsample_type="number", downsample_rate=20, random_seed=7)
+    with pyteomics.mgf.read(str(out1), use_index=False) as r1:
+        titles1 = [s["params"].get("title") for s in r1]
+    with pyteomics.mgf.read(str(out2), use_index=False) as r2:
+        titles2 = [s["params"].get("title") for s in r2]
+    assert titles1 == titles2
+
+
+def test_ds_same_path_raises(tmp_path):
+    inp = _write_mgf_file(
+        tmp_path / "in.mgf",
+        [make_spectrum("P", [1.0], [1.0])],
+    )
+    with pytest.raises(ValueError, match="different paths"):
+        downsample_spectra(inp, inp)
+
+
+def test_ds_invalid_type_raises(tmp_path):
+    inp = _write_mgf_file(tmp_path / "in.mgf", [make_spectrum("P", [1.0], [1.0])])
+    with pytest.raises(ValueError, match="downsample-type"):
+        downsample_spectra(inp, tmp_path / "out.mgf", downsample_type="bad")
+
+
+def test_ds_proportion_out_of_range_raises(tmp_path):
+    inp = _write_mgf_file(tmp_path / "in.mgf", [make_spectrum("P", [1.0], [1.0])])
+    with pytest.raises(ValueError, match=r"\(0, 1\]"):
+        downsample_spectra(inp, tmp_path / "out.mgf", downsample_type="proportion", downsample_rate=1.5)
