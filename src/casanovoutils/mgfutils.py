@@ -347,8 +347,8 @@ _VALID_DOWNSAMPLE_TYPES = frozenset({"number", "proportion"})
 
 def spectra_per_peptide(
     spectra: SpectraInput,
-    k: int = 1,
     outfile: Optional[PathLike] = None,
+    k: int = 1,
     random_seed: int = 42,
 ) -> list[PyteomicsSpectrum]:
     """
@@ -364,10 +364,10 @@ def spectra_per_peptide(
     ----------
     spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
         Spectrum source — see :func:`iter_spectra` for accepted types.
-    k : int, default=1
-        Maximum number of spectra to retain per peptide sequence.
     outfile : PathLike, optional
         If provided, write the sampled spectra to this MGF file path.
+    k : int, default=1
+        Maximum number of spectra to retain per peptide sequence.
     random_seed : int, default=42
         Seed for the local random number generator.
 
@@ -376,6 +376,8 @@ def spectra_per_peptide(
     list[PyteomicsSpectrum]
         Sampled spectra, grouped by peptide in first-seen order.
     """
+    if not isinstance(k, int) or k < 1:
+        raise ValueError(f"--k must be a positive integer, got {k!r}.")
     configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
     logging.info(
         "Sampling up to k=%d spectra per peptide (random_seed=%d)", k, random_seed
@@ -444,7 +446,7 @@ def downsample_spectra(
 
     if downsample_type not in _VALID_DOWNSAMPLE_TYPES:
         raise ValueError(
-            f"--downsample-type must be one of {sorted(_VALID_DOWNSAMPLE_TYPES)}, "
+            f"--downsample_type must be one of {sorted(_VALID_DOWNSAMPLE_TYPES)}, "
             f"got {downsample_type!r}."
         )
 
@@ -455,14 +457,14 @@ def downsample_spectra(
             or int(downsample_rate) < 1
         ):
             raise ValueError(
-                "--downsample-rate must be a positive integer when "
-                f"--downsample-type is 'number', got {downsample_rate!r}."
+                "--downsample_rate must be a positive integer when "
+                f"--downsample_type is 'number', got {downsample_rate!r}."
             )
     else:
         if not (0 < downsample_rate <= 1):
             raise ValueError(
-                "--downsample-rate must be in (0, 1] when "
-                f"--downsample-type is '{downsample_type}', "
+                "--downsample_rate must be in (0, 1] when "
+                f"--downsample_type is '{downsample_type}', "
                 f"got {downsample_rate!r}."
             )
 

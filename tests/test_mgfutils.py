@@ -322,6 +322,14 @@ def test_spp_accepts_generator():
     assert result[0]["params"]["seq"] == "AAA"
 
 
+def test_spp_invalid_k_raises():
+    spectra = [make_spectrum("AAA", [1.0], [1.0])]
+    with pytest.raises(ValueError, match="--k"):
+        spectra_per_peptide(spectra, k=0)
+    with pytest.raises(ValueError, match="--k"):
+        spectra_per_peptide(spectra, k=-1)
+
+
 # ---------------------------------------------------------------------------
 # downsample_spectra
 # ---------------------------------------------------------------------------
@@ -381,10 +389,10 @@ def test_ds_reproducible(tmp_path):
         inp, out2, downsample_type="number", downsample_rate=20, random_seed=7
     )
     with pyteomics.mgf.read(str(out1), use_index=False) as r1:
-        titles1 = [s["params"].get("title") for s in r1]
+        mz1 = [s["m/z array"][0] for s in r1]
     with pyteomics.mgf.read(str(out2), use_index=False) as r2:
-        titles2 = [s["params"].get("title") for s in r2]
-    assert titles1 == titles2
+        mz2 = [s["m/z array"][0] for s in r2]
+    assert mz1 == mz2
 
 
 def test_ds_same_path_raises(tmp_path):
@@ -398,7 +406,7 @@ def test_ds_same_path_raises(tmp_path):
 
 def test_ds_invalid_type_raises(tmp_path):
     inp = _write_mgf_file(tmp_path / "in.mgf", [make_spectrum("P", [1.0], [1.0])])
-    with pytest.raises(ValueError, match="downsample-type"):
+    with pytest.raises(ValueError, match="downsample_type"):
         downsample_spectra(inp, tmp_path / "out.mgf", downsample_type="bad")
 
 
