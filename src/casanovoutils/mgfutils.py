@@ -470,9 +470,7 @@ def downsample_spectra(
 
     # First pass: count total spectra.
     with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
-        n = sum(
-            1 for _ in tqdm.tqdm(reader, desc="Counting spectra", unit="spectrum")
-        )
+        n = sum(1 for _ in tqdm.tqdm(reader, desc="Counting spectra", unit="spectrum"))
 
     if downsample_type == "number":
         k = min(int(downsample_rate), n)

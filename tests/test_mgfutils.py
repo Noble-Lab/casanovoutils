@@ -374,8 +374,12 @@ def test_ds_reproducible(tmp_path):
     )
     out1 = tmp_path / "out1.mgf"
     out2 = tmp_path / "out2.mgf"
-    downsample_spectra(inp, out1, downsample_type="number", downsample_rate=20, random_seed=7)
-    downsample_spectra(inp, out2, downsample_type="number", downsample_rate=20, random_seed=7)
+    downsample_spectra(
+        inp, out1, downsample_type="number", downsample_rate=20, random_seed=7
+    )
+    downsample_spectra(
+        inp, out2, downsample_type="number", downsample_rate=20, random_seed=7
+    )
     with pyteomics.mgf.read(str(out1), use_index=False) as r1:
         titles1 = [s["params"].get("title") for s in r1]
     with pyteomics.mgf.read(str(out2), use_index=False) as r2:
@@ -401,4 +405,6 @@ def test_ds_invalid_type_raises(tmp_path):
 def test_ds_proportion_out_of_range_raises(tmp_path):
     inp = _write_mgf_file(tmp_path / "in.mgf", [make_spectrum("P", [1.0], [1.0])])
     with pytest.raises(ValueError, match=r"\(0, 1\]"):
-        downsample_spectra(inp, tmp_path / "out.mgf", downsample_type="proportion", downsample_rate=1.5)
+        downsample_spectra(
+            inp, tmp_path / "out.mgf", downsample_type="proportion", downsample_rate=1.5
+        )
