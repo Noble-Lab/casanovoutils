@@ -4,6 +4,8 @@ Utility tools for **evaluating, visualizing, and manipulating peptide-spectrum
 match (PSM) data**, designed to work cleanly with
 [Casanovo](https://casanovo.readthedocs.io/), **mzTab**, and **MGF** files.
 
+## [Documentation](https://casanovo.readthedocs.io/en/latest/)
+
 ## Features
 
 - **MGF processing pipeline** — shuffle, downsample by peptide sequence, and
