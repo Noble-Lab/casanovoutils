@@ -30,6 +30,7 @@ SpectraInput = PathLike | Iterable[PathLike] | Iterable[PyteomicsSpectrum]
 def iter_spectra(
     spectra: SpectraInput,
     desc: Optional[str] = None,
+    miniters: int = 1,
 ) -> Iterable[PyteomicsSpectrum]:
     """
     Normalize various spectrum input types to an iterable of PyteomicsSpectrum.
@@ -44,6 +45,8 @@ def iter_spectra(
     desc : str, optional
         Description for the tqdm progress bar. If ``None``, no progress bar
         is shown.
+    miniters : int, default=1
+        Minimum number of iterations between progress bar updates.
 
     Yields
     ------
@@ -68,7 +71,7 @@ def iter_spectra(
             raw = itertools.chain([first], it)
 
     if desc is not None:
-        raw = tqdm.tqdm(raw, desc=desc, unit="psm")
+        raw = tqdm.tqdm(raw, desc=desc, unit="psm", miniters=miniters)
 
     yield from raw
 
@@ -431,7 +434,7 @@ def spectra_per_peptide(
     reservoir: dict = {}
     counts: dict = {}
 
-    for spectrum in iter_spectra(spectra, desc="Streaming spectra"):
+    for spectrum in iter_spectra(spectra, desc="Streaming spectra", miniters=100_000):
         key = _group_key(spectrum, precursor=precursor, ignore_mods=ignore_mods)
         count = counts.get(key, 0) + 1
         counts[key] = count
