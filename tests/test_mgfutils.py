@@ -359,6 +359,15 @@ def test_spp_precursor_false_merges_charge_states():
     assert len(result) == 2
 
 
+def test_spp_precursor_list_charge_values():
+    # pyteomics parses CHARGE fields as ChargeList (a list subclass, unhashable)
+    spectra = [
+        make_spectrum_with_charge("AAA", [2], [float(i)], [1.0]) for i in range(3)
+    ] + [make_spectrum_with_charge("AAA", [3], [float(i)], [1.0]) for i in range(3)]
+    result = spectra_per_peptide(spectra, k=1, precursor=True)
+    assert len(result) == 2
+
+
 def test_spp_precursor_no_charge_field_does_not_raise():
     spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(3)]
     result = spectra_per_peptide(spectra, k=1, precursor=True)

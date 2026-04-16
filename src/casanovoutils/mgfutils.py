@@ -365,6 +365,9 @@ def _group_key(spectrum, precursor=False, ignore_mods=False):
         seq = re.sub(r"\[.*?\]", "", seq).strip("-")
     if precursor:
         charge = spectrum["params"].get("charge", "")
+        # pyteomics returns ChargeList (a list subclass) for the charge field,
+        # which is unhashable. Convert to a canonical string for use as a key.
+        charge = str(charge)
         return (seq, charge)
     return seq
 
@@ -384,7 +387,7 @@ def spectra_per_peptide(
     of size k per unique group.  For the j-th occurrence of a group: if
     j <= k, add unconditionally; if j > k, replace a uniformly random
     reservoir slot with probability k/j.  Memory usage is
-    O(unique groups × k) rather than O(total spectra).
+    O(unique groups x k) rather than O(total spectra).
 
     Parameters
     ----------
@@ -553,7 +556,7 @@ COMMANDS: Commands = {
 
 
 def main() -> None:
-    fire.Fire(COMMANDS)
+    fire.Fire(COMMANDS, serialize=lambda _: "")
 
 
 if __name__ == "__main__":
