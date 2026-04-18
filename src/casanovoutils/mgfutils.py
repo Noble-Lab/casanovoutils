@@ -246,6 +246,22 @@ def purge_redundant(
     return spectra
 
 
+def _iter_raw_blocks(paths: Iterable[PathLike]) -> Iterable[str]:
+    """Yield raw MGF text blocks from one or more file paths without parsing."""
+    for path in paths:
+        with open(path) as f:
+            block: list[str] = []
+            for line in f:
+                if line.strip() == "BEGIN IONS":
+                    block = [line]
+                elif line.strip() == "END IONS":
+                    block.append(line)
+                    yield "".join(block)
+                    block = []
+                elif block:
+                    block.append(line)
+
+
 def shuffle(
     spectra: SpectraInput,
     outfile: Optional[PathLike] = None,
@@ -253,6 +269,11 @@ def shuffle(
 ) -> list[PyteomicsSpectrum]:
     """
     Read all spectra and return them in a shuffled order.
+
+    When *spectra* is a file path (or iterable of file paths) and *outfile* is
+    provided, a fast raw-text path is used: entries are shuffled as opaque
+    strings without parsing peaks, which is significantly faster than the
+    pyteomics parse/serialize round-trip.
 
     Parameters
     ----------
@@ -266,12 +287,41 @@ def shuffle(
     Returns
     -------
     list[PyteomicsSpectrum]
-        All spectra in shuffled order.
+        All spectra in shuffled order, or an empty list when the fast raw-text
+        path is used (output was written directly to *outfile*).
     """
     configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
 
     logging.info("Shuffling spectra (random_seed=%d)", random_seed)
     random.seed(random_seed)
+
+    # Fast path: avoid pyteomics parse/serialize when input is file path(s).
+    if outfile is not None:
+        if isinstance(spectra, (str, os.PathLike)):
+            paths: list[PathLike] = [spectra]
+            use_raw = True
+        else:
+            it = iter(spectra)
+            try:
+                first = next(it)
+            except StopIteration:
+                return []
+            if isinstance(first, (str, os.PathLike)):
+                paths = list(itertools.chain([first], it))
+                use_raw = True
+            else:
+                spectra = itertools.chain([first], it)
+                use_raw = False
+
+        if use_raw:
+            blocks = list(
+                tqdm.tqdm(_iter_raw_blocks(paths), desc="Reading spectra", unit="psm")
+            )
+            random.shuffle(blocks)
+            logging.info("Shuffled %d spectra", len(blocks))
+            with open(outfile, "w") as f:
+                f.writelines(tqdm.tqdm(blocks, desc=f"Writing {outfile}", unit="psm"))
+            return []
 
     result = list(iter_spectra(spectra, desc="Reading spectra"))
     random.shuffle(result)
