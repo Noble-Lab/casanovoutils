@@ -212,6 +212,56 @@ def test_shuffle_writes_file(tmp_path):
     assert outfile.exists()
 
 
+def _write_mgf(path, sequences):
+    """Write a minimal MGF file with one entry per sequence."""
+    with open(path, "w") as f:
+        for seq in sequences:
+            f.write("BEGIN IONS\n")
+            f.write(f"SEQ={seq}\n")
+            f.write("100.0 1.0\n")
+            f.write("END IONS\n")
+
+
+def test_shuffle_fast_path_single_file(tmp_path):
+    mgf_in = tmp_path / "input.mgf"
+    mgf_out = tmp_path / "output.mgf"
+    sequences = ["PEPTIDE", "ANOTHER", "THIRD", "FOURTH", "FIFTH"]
+    _write_mgf(mgf_in, sequences)
+
+    result = shuffle(mgf_in, outfile=mgf_out, random_seed=42)
+
+    assert result == []
+    assert mgf_out.exists()
+    content = mgf_out.read_text()
+    for seq in sequences:
+        assert content.count(f"SEQ={seq}") == 1
+
+
+def test_shuffle_fast_path_multiple_files(tmp_path):
+    mgf1 = tmp_path / "input1.mgf"
+    mgf2 = tmp_path / "input2.mgf"
+    mgf_out = tmp_path / "output.mgf"
+    seqs1 = ["PEPTIDE", "ANOTHER"]
+    seqs2 = ["THIRD", "FOURTH"]
+    _write_mgf(mgf1, seqs1)
+    _write_mgf(mgf2, seqs2)
+
+    result = shuffle([mgf1, mgf2], outfile=mgf_out, random_seed=42)
+
+    assert result == []
+    assert mgf_out.exists()
+    content = mgf_out.read_text()
+    for seq in seqs1 + seqs2:
+        assert content.count(f"SEQ={seq}") == 1
+
+
+def test_shuffle_fast_path_empty_input(tmp_path):
+    mgf_out = tmp_path / "output.mgf"
+    result = shuffle(iter([]), outfile=mgf_out)
+    assert result == []
+    assert mgf_out.exists()
+
+
 # ---------------------------------------------------------------------------
 # pipeline
 # ---------------------------------------------------------------------------
@@ -328,6 +378,100 @@ def test_spp_invalid_k_raises():
         spectra_per_peptide(spectra, k=0)
     with pytest.raises(ValueError, match="--k"):
         spectra_per_peptide(spectra, k=-1)
+
+
+def make_spectrum_with_charge(seq, charge, mz, intensity):
+    s = make_spectrum(seq, mz, intensity)
+    s["params"]["charge"] = charge
+    return s
+
+
+# ---------------------------------------------------------------------------
+# spectra_per_peptide --precursor
+# ---------------------------------------------------------------------------
+
+
+def test_spp_precursor_separates_charge_states():
+    spectra = [
+        make_spectrum_with_charge("AAA", "2+", [float(i)], [1.0]) for i in range(4)
+    ] + [make_spectrum_with_charge("AAA", "3+", [float(i)], [1.0]) for i in range(4)]
+    result = spectra_per_peptide(spectra, k=2, precursor=True)
+    charges = [s["params"]["charge"] for s in result]
+    assert charges.count("2+") == 2
+    assert charges.count("3+") == 2
+
+
+def test_spp_precursor_false_merges_charge_states():
+    spectra = [
+        make_spectrum_with_charge("AAA", "2+", [float(i)], [1.0]) for i in range(4)
+    ] + [make_spectrum_with_charge("AAA", "3+", [float(i)], [1.0]) for i in range(4)]
+    result = spectra_per_peptide(spectra, k=2, precursor=False)
+    assert len(result) == 2
+
+
+def test_spp_precursor_list_charge_values():
+    # pyteomics parses CHARGE fields as ChargeList (a list subclass, unhashable)
+    spectra = [
+        make_spectrum_with_charge("AAA", [2], [float(i)], [1.0]) for i in range(3)
+    ] + [make_spectrum_with_charge("AAA", [3], [float(i)], [1.0]) for i in range(3)]
+    result = spectra_per_peptide(spectra, k=1, precursor=True)
+    assert len(result) == 2
+
+
+def test_spp_precursor_no_charge_field_does_not_raise():
+    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(3)]
+    result = spectra_per_peptide(spectra, k=1, precursor=True)
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# spectra_per_peptide --ignore-mods
+# ---------------------------------------------------------------------------
+
+
+def test_spp_ignore_mods_merges_modified_forms():
+    spectra = [make_spectrum("[Acetyl]-AAA", [float(i)], [1.0]) for i in range(4)] + [
+        make_spectrum("AAA", [float(i)], [1.0]) for i in range(4)
+    ]
+    result = spectra_per_peptide(spectra, k=2, ignore_mods=True)
+    assert len(result) == 2
+
+
+def test_spp_ignore_mods_false_keeps_modified_separate():
+    spectra = [make_spectrum("[Acetyl]-AAA", [float(i)], [1.0]) for i in range(4)] + [
+        make_spectrum("AAA", [float(i)], [1.0]) for i in range(4)
+    ]
+    result = spectra_per_peptide(spectra, k=2, ignore_mods=False)
+    assert len(result) == 4
+
+
+def test_spp_ignore_mods_inline_mod():
+    spectra = [
+        make_spectrum("AAC[Carbamidomethyl]K", [float(i)], [1.0]) for i in range(3)
+    ] + [make_spectrum("AACK", [float(i)], [1.0]) for i in range(3)]
+    result = spectra_per_peptide(spectra, k=1, ignore_mods=True)
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# spectra_per_peptide --precursor + --ignore-mods
+# ---------------------------------------------------------------------------
+
+
+def test_spp_precursor_and_ignore_mods_combined():
+    spectra = (
+        [
+            make_spectrum_with_charge("[Acetyl]-AAA", "2+", [float(i)], [1.0])
+            for i in range(3)
+        ]
+        + [make_spectrum_with_charge("AAA", "2+", [float(i)], [1.0]) for i in range(3)]
+        + [make_spectrum_with_charge("AAA", "3+", [float(i)], [1.0]) for i in range(3)]
+    )
+    result = spectra_per_peptide(spectra, k=1, precursor=True, ignore_mods=True)
+    charges = [s["params"]["charge"] for s in result]
+    assert len(result) == 2
+    assert charges.count("2+") == 1
+    assert charges.count("3+") == 1
 
 
 # ---------------------------------------------------------------------------
