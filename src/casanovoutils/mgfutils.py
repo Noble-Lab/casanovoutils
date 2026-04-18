@@ -247,7 +247,13 @@ def purge_redundant(
 
 
 def _iter_raw_blocks(paths: Iterable[PathLike]) -> Iterable[str]:
-    """Yield raw MGF text blocks from one or more file paths without parsing."""
+    """Yield raw MGF text blocks from one or more file paths without parsing.
+
+    Lines before the first ``BEGIN IONS`` (global MGF header parameters) are
+    not preserved. This is intentional: global headers are uncommon in practice
+    and the fast path is not a drop-in replacement for the pyteomics round-trip
+    in their presence.
+    """
     for path in paths:
         with open(path) as f:
             block: list[str] = []
@@ -305,6 +311,7 @@ def shuffle(
             try:
                 first = next(it)
             except StopIteration:
+                open(outfile, "w").close()
                 return []
             if isinstance(first, (str, os.PathLike)):
                 paths = list(itertools.chain([first], it))

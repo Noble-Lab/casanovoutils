@@ -212,6 +212,56 @@ def test_shuffle_writes_file(tmp_path):
     assert outfile.exists()
 
 
+def _write_mgf(path, sequences):
+    """Write a minimal MGF file with one entry per sequence."""
+    with open(path, "w") as f:
+        for seq in sequences:
+            f.write("BEGIN IONS\n")
+            f.write(f"SEQ={seq}\n")
+            f.write("100.0 1.0\n")
+            f.write("END IONS\n")
+
+
+def test_shuffle_fast_path_single_file(tmp_path):
+    mgf_in = tmp_path / "input.mgf"
+    mgf_out = tmp_path / "output.mgf"
+    sequences = ["PEPTIDE", "ANOTHER", "THIRD", "FOURTH", "FIFTH"]
+    _write_mgf(mgf_in, sequences)
+
+    result = shuffle(mgf_in, outfile=mgf_out, random_seed=42)
+
+    assert result == []
+    assert mgf_out.exists()
+    content = mgf_out.read_text()
+    for seq in sequences:
+        assert content.count(f"SEQ={seq}") == 1
+
+
+def test_shuffle_fast_path_multiple_files(tmp_path):
+    mgf1 = tmp_path / "input1.mgf"
+    mgf2 = tmp_path / "input2.mgf"
+    mgf_out = tmp_path / "output.mgf"
+    seqs1 = ["PEPTIDE", "ANOTHER"]
+    seqs2 = ["THIRD", "FOURTH"]
+    _write_mgf(mgf1, seqs1)
+    _write_mgf(mgf2, seqs2)
+
+    result = shuffle([mgf1, mgf2], outfile=mgf_out, random_seed=42)
+
+    assert result == []
+    assert mgf_out.exists()
+    content = mgf_out.read_text()
+    for seq in seqs1 + seqs2:
+        assert content.count(f"SEQ={seq}") == 1
+
+
+def test_shuffle_fast_path_empty_input(tmp_path):
+    mgf_out = tmp_path / "output.mgf"
+    result = shuffle(iter([]), outfile=mgf_out)
+    assert result == []
+    assert mgf_out.exists()
+
+
 # ---------------------------------------------------------------------------
 # pipeline
 # ---------------------------------------------------------------------------
