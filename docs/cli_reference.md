@@ -15,7 +15,11 @@ casanovoutils
 │   ├── pipeline
 │   ├── shuffle
 │   ├── downsample
+│   ├── spectra-per-peptide
+│   ├── downsample-spectra
 │   └── purge-redundant
+├── mzmlutils    — mzML file sampling
+│   └── sample-spectra
 ├── denovo       — Load and join PSM data
 │   ├── get_mgf_psms
 │   ├── get_mztab
@@ -117,6 +121,49 @@ peak by less than `epsilon`.
 
 ```bash
 casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf --epsilon 0.005
+```
+
+---
+
+## `casanovoutils mzmlutils`
+
+Sample spectra from mzML files.
+
+### `sample-spectra`
+
+Read an mzML file in chunks of `buffer_size` spectra and draw a random
+proportion `k` from each chunk without replacement.  Makes a single streaming
+pass — no up-front count is required.
+
+The output format is inferred from the file extension of `--outfile`:
+`.mgf` writes an MGF file; `.mzml` writes a minimal valid mzML 1.1.0 file.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `input_file` | path | required | Input mzML file |
+| `k` | float | required | Proportion of spectra to sample; must be in (0, 1) |
+| `--outfile` | path | `None` | Output file path (`.mgf` or `.mzml`) |
+| `--buffer_size` | int | `1000` | Spectra read per I/O chunk |
+| `--random_seed` | int | `42` | Random seed for reproducibility |
+
+> **Note on count accuracy:** the final sample count equals
+> `sum(round(k × b) for b in buffers)`, which can differ slightly from
+> `round(k × total)` due to per-buffer rounding.  Use a `buffer_size` large
+> relative to `1 / k` to minimise this effect.
+
+**Examples:**
+
+```bash
+# Sample 10 % of spectra, write as MGF
+casanovoutils mzmlutils sample-spectra input.mzML 0.1 --outfile sampled.mgf
+
+# Sample 25 % with a 5 000-spectrum buffer, write as mzML
+casanovoutils mzmlutils sample-spectra input.mzML 0.25 \
+  --outfile sampled.mzml --buffer_size 5000
+
+# Sample with a fixed seed for reproducibility
+casanovoutils mzmlutils sample-spectra input.mzML 0.5 \
+  --outfile sampled.mgf --random_seed 123
 ```
 
 ---
