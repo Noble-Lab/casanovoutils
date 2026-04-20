@@ -1,7 +1,8 @@
 # File Formats
 
-casanovoutils reads and writes two file formats: **MGF** and **mzTab**. This
-page describes the relevant fields and conventions expected by each tool.
+casanovoutils reads and writes three file formats: **MGF**, **mzML**, and
+**mzTab**. This page describes the relevant fields and conventions expected
+by each tool.
 
 ---
 
@@ -45,6 +46,38 @@ space-separated.
   **zero-based** positions within the MGF file.
 - The `SEQ=` field is required for ground-truth evaluation. Casanovo writes
   this field when it generates annotated MGF output.
+
+---
+
+## mzML
+
+mzML is the PSI standard XML format for raw and processed mass spectrometry
+data. casanovoutils reads mzML files via
+[Pyteomics](https://pyteomics.readthedocs.io/) and can write a minimal
+mzML 1.1.0 output using `casanovoutils mzmlutils sample-spectra`.
+
+### Fields preserved on read and write
+
+| Field | Description |
+|---|---|
+| `m/z array` | Peak m/z values (float64) |
+| `intensity array` | Peak intensity values (float64) |
+| `ms level` | MS level (e.g. `2` for MS2 spectra); defaults to `2` if absent |
+| `id` | Spectrum identifier string (e.g. `scan=1`) |
+
+### Written mzML structure
+
+When writing mzML output, casanovoutils produces a minimal but schema-valid
+mzML 1.1.0 file. Binary data arrays are zlib-compressed and base64-encoded
+as 64-bit floats. Only `m/z array`, `intensity array`, `ms level`, and the
+spectrum `id` are preserved; other metadata from the source file is not
+carried through.
+
+### Notes
+
+- casanovoutils reads mzML files using `pyteomics.mzml.MzML`, which supports
+  both indexed and non-indexed mzML.
+- Output mzML files can be read back by Pyteomics or any standard mzML reader.
 
 ---
 

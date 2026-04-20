@@ -12,6 +12,10 @@ state-of-the-art de novo peptide sequencing tool, and works directly with
   purge near-duplicate peaks, either as individual steps or chained together
   via the `casanovoutils mgf pipeline` command.
 
+- **mzML sampling** — stream-sample a proportion of spectra from mzML files
+  in a single pass using per-buffer random sampling, with output to MGF or
+  mzML format via `casanovoutils mzmlutils sample-spectra`.
+
 - **PSM data loading** — parse MGF and mzTab files into Polars DataFrames,
   join predicted and ground-truth annotations, and export to Parquet, CSV,
   or TSV via `casanovoutils denovo`.
@@ -34,6 +38,7 @@ faq
 :caption: API Reference
 
 api/mgfutils
+api/mzmlutils
 api/denovoutils
 api/align
 api/preccov

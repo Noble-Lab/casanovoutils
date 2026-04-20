@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { email = "gwenneth.straub@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
     "depthcharge-ms>=0.4.9",
     "fire>=0.7.1",
@@ -42,4 +42,5 @@ dev = [
     "black>=25.11.0",
     "isort>=7.0.0",
     "pytest>=9.0.2",
+    "ruff>=0.15.11",
 ]

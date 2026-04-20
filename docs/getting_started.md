@@ -38,6 +38,7 @@ shell:
 ```bash
 casanovoutils --help
 casanovoutils mgf --help
+casanovoutils mzmlutils --help
 casanovoutils denovo --help
 ```
 
@@ -63,6 +64,20 @@ Remove peaks separated by less than 0.001 Da:
 
 ```bash
 casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
+```
+
+### Sample spectra from an mzML file
+
+Sample 10% of spectra and write to MGF:
+
+```bash
+casanovoutils mzmlutils sample-spectra input.mzML 0.1 --outfile sampled.mgf
+```
+
+Or write back as mzML:
+
+```bash
+casanovoutils mzmlutils sample-spectra input.mzML 0.1 --outfile sampled.mzml
 ```
 
 ### Load PSM data into a DataFrame

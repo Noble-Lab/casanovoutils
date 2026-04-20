@@ -229,9 +229,7 @@ def test_get_mgf_psms_df_passthrough_ignores_meta_data_only(simple_df):
 
 
 def test_get_mgf_psms_df_meta_data_only_excludes_array_columns(tmp_path):
-    mgf_content = (
-        "BEGIN IONS\n" "TITLE=spec1\n" "100.0 500.0\n" "200.0 300.0\n" "END IONS\n"
-    )
+    mgf_content = "BEGIN IONS\nTITLE=spec1\n100.0 500.0\n200.0 300.0\nEND IONS\n"
     mgf_path = tmp_path / "test.mgf"
     mgf_path.write_text(mgf_content)
 
@@ -241,9 +239,7 @@ def test_get_mgf_psms_df_meta_data_only_excludes_array_columns(tmp_path):
 
 
 def test_get_mgf_psms_df_not_meta_data_only_includes_array_columns(tmp_path):
-    mgf_content = (
-        "BEGIN IONS\n" "TITLE=spec1\n" "100.0 500.0\n" "200.0 300.0\n" "END IONS\n"
-    )
+    mgf_content = "BEGIN IONS\nTITLE=spec1\n100.0 500.0\n200.0 300.0\nEND IONS\n"
     mgf_path = tmp_path / "test.mgf"
     mgf_path.write_text(mgf_content)
 
@@ -272,12 +268,7 @@ def test_get_ground_truth_df_list_run2_joins_second_file(mgf_df1, mgf_df2):
 
 def test_get_mgf_psms_df_n_peaks_correct_from_file(tmp_path):
     mgf_content = (
-        "BEGIN IONS\n"
-        "TITLE=spec1\n"
-        "100.0 500.0\n"
-        "200.0 300.0\n"
-        "300.0 100.0\n"
-        "END IONS\n"
+        "BEGIN IONS\nTITLE=spec1\n100.0 500.0\n200.0 300.0\n300.0 100.0\nEND IONS\n"
     )
     mgf_path = tmp_path / "test.mgf"
     mgf_path.write_text(mgf_content)
@@ -287,7 +278,7 @@ def test_get_mgf_psms_df_n_peaks_correct_from_file(tmp_path):
 
 
 def test_get_mgf_psms_df_columns_have_mgf_prefix(tmp_path):
-    mgf_content = "BEGIN IONS\n" "TITLE=spec1\n" "100.0 500.0\n" "END IONS\n"
+    mgf_content = "BEGIN IONS\nTITLE=spec1\n100.0 500.0\nEND IONS\n"
     mgf_path = tmp_path / "test.mgf"
     mgf_path.write_text(mgf_content)
 
