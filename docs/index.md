@@ -13,8 +13,8 @@ state-of-the-art de novo peptide sequencing tool, and works directly with
   via the `casanovoutils mgf pipeline` command.
 
 - **mzML sampling** — stream-sample a proportion of spectra from mzML files
-  in a single pass using per-buffer random sampling, with output to MGF or
-  mzML format via `casanovoutils mzmlutils sample-spectra`.
+  in a single pass using per-buffer random sampling, writing output as MGF
+  via `casanovoutils mzmlutils`.
 
 - **PSM data loading** — parse MGF and mzTab files into Polars DataFrames,
   join predicted and ground-truth annotations, and export to Parquet, CSV,

@@ -10,6 +10,8 @@ match (PSM) data**, designed to work cleanly with
 
 - **MGF processing pipeline** — shuffle, downsample by peptide sequence, and
   purge near-duplicate peaks, individually or chained in a single command
+- **mzML sampling** — stream-sample a proportion of spectra from an mzML file
+  in a single pass and write the result as MGF
 - **PSM data loading** — parse MGF and mzTab files into Polars DataFrames and
   join them into a ground-truth table
 - **Precision–coverage evaluation** — compute and plot Prec–Cov curves with
@@ -33,7 +35,7 @@ Shuffle, downsample to at most 2 spectra per peptide, and remove near-duplicate
 peaks in one pass:
 
 ```bash
-casanovoutils mgf pipeline input.mgf \
+casanovoutils mgfutils pipeline input.mgf \
   --outfile out.mgf \
   --downsample_k 2 \
   --purge_epsilon 0.001
@@ -42,9 +44,9 @@ casanovoutils mgf pipeline input.mgf \
 Run a single stage:
 
 ```bash
-casanovoutils mgf shuffle input.mgf --outfile shuffled.mgf
-casanovoutils mgf downsample input.mgf --outfile sampled.mgf --k 3
-casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
+casanovoutils mgfutils shuffle input.mgf --outfile shuffled.mgf
+casanovoutils mgfutils downsample input.mgf --outfile sampled.mgf --k 3
+casanovoutils mgfutils purge-redundant input.mgf --outfile purged.mgf
 ```
 
 ### Load PSM data
@@ -52,15 +54,15 @@ casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
 Join MGF metadata with mzTab predictions into a single DataFrame:
 
 ```bash
-casanovoutils denovo get_groundtruth input.mgf results.mztab \
+casanovoutils denovoutils get_groundtruth input.mgf results.mztab \
   --out_path groundtruth.parquet
 ```
 
 Load either source individually:
 
 ```bash
-casanovoutils denovo get_mgf_psms input.mgf --out_path psms.parquet
-casanovoutils denovo get_mztab results.mztab --out_path matches.parquet
+casanovoutils denovoutils get_mgf_psms input.mgf --out_path psms.parquet
+casanovoutils denovoutils get_mztab results.mztab --out_path matches.parquet
 ```
 
 ### Export the residue mass table
@@ -78,27 +80,57 @@ All commands live under the single `casanovoutils` entry point:
 
 ```text
 casanovoutils
-├── mgf
+├── mgfutils            MGF file processing
 │   ├── pipeline        shuffle → downsample → purge-redundant in one pass
 │   ├── shuffle         randomise spectrum order
 │   ├── downsample      limit spectra per peptide sequence
+│   ├── spectra-per-peptide  reservoir-sample k spectra per peptide
+│   ├── downsample-spectra   downsample to a target count or proportion
 │   └── purge-redundant remove near-duplicate peaks by m/z
-├── denovo
+├── mzmlutils           sample a proportion of spectra from an mzML file
+├── denovoutils         load PSM data into Polars DataFrames
 │   ├── get_mgf_psms    load MGF metadata into a DataFrame
 │   ├── get_mztab       load mzTab PSMs into a DataFrame
 │   └── get_groundtruth join MGF + mzTab into a ground-truth table
-└── dump-residues
-    └── dump            copy the default residue mass YAML to a path
+├── preccov             precision-coverage evaluation
+│   ├── get_pc_df       build a precision-coverage DataFrame
+│   └── graph_prec_cov  plot precision-coverage curves
+├── summarize_mgf       MGF file statistics and HTML reports
+│   ├── summarize       full HTML summary report
+│   ├── charge-distribution
+│   ├── fragment-coverage
+│   ├── peak-counts
+│   └── peptide-lengths
+├── datasets            create train/val/test splits from MGF files
+├── graphloss           plot Casanovo training/validation loss curves
+└── residues            copy the bundled residue mass YAML to a path
 ```
 
 Pass `--help` to any subcommand for full argument details:
 
 ```bash
-casanovoutils mgf pipeline --help
-casanovoutils denovo get_groundtruth --help
+casanovoutils mgfutils pipeline --help
+casanovoutils mzmlutils --help
+casanovoutils denovoutils get_groundtruth --help
 ```
 
-### `casanovoutils mgf pipeline`
+### `casanovoutils mzmlutils`
+
+Sample a proportion of spectra from an mzML file and write the result as MGF.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `input_file` | path | required | Input mzML file |
+| `k` | float | required | Proportion to sample; must be in (0, 1) |
+| `outfile` | path | required | Output MGF file path |
+| `--buffer_size` | int | `1000` | Spectra read per I/O chunk |
+| `--random_seed` | int | `42` | Random seed for reproducibility |
+
+```bash
+casanovoutils mzmlutils input.mzML 0.1 sampled.mgf
+```
+
+### `casanovoutils mgfutils pipeline`
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -109,24 +141,7 @@ casanovoutils denovo get_groundtruth --help
 | `--purge_epsilon` | float | `None` | Min m/z gap in Da to keep a peak (skipped if omitted) |
 | `--random_seed` | int | `42` | Seed for shuffle and downsample |
 
-### `casanovoutils mgf downsample`
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `spectra` | path | required | Input MGF file |
-| `--k` | int | `1` | Max spectra per peptide sequence |
-| `--outfile` | path | `None` | Output MGF file |
-| `--random_seed` | int | `42` | Random seed |
-
-### `casanovoutils mgf purge-redundant`
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `spectra` | path | required | Input MGF file |
-| `--epsilon` | float | `0.001` | Min m/z separation in Da |
-| `--outfile` | path | `None` | Output MGF file |
-
-### `casanovoutils denovo get_groundtruth`
+### `casanovoutils denovoutils get_groundtruth`
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |

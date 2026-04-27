@@ -37,9 +37,9 @@ shell:
 
 ```bash
 casanovoutils --help
-casanovoutils mgf --help
+casanovoutils mgfutils --help
 casanovoutils mzmlutils --help
-casanovoutils denovo --help
+casanovoutils denovoutils --help
 ```
 
 ## Quick start examples
@@ -49,13 +49,13 @@ casanovoutils denovo --help
 Shuffle spectra and retain at most 2 per peptide sequence:
 
 ```bash
-casanovoutils mgf pipeline input.mgf --outfile out.mgf --downsample_k 2
+casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --downsample_k 2
 ```
 
 ### Downsample only (no shuffle)
 
 ```bash
-casanovoutils mgf downsample input.mgf --outfile sampled.mgf --k 2
+casanovoutils mgfutils downsample input.mgf --outfile sampled.mgf --k 2
 ```
 
 ### Remove near-duplicate peaks
@@ -63,7 +63,7 @@ casanovoutils mgf downsample input.mgf --outfile sampled.mgf --k 2
 Remove peaks separated by less than 0.001 Da:
 
 ```bash
-casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
+casanovoutils mgfutils purge-redundant input.mgf --outfile purged.mgf
 ```
 
 ### Sample spectra from an mzML file
@@ -71,26 +71,42 @@ casanovoutils mgf purge-redundant input.mgf --outfile purged.mgf
 Sample 10% of spectra and write to MGF:
 
 ```bash
-casanovoutils mzmlutils sample-spectra input.mzML 0.1 --outfile sampled.mgf
-```
-
-Or write back as mzML:
-
-```bash
-casanovoutils mzmlutils sample-spectra input.mzML 0.1 --outfile sampled.mzml
+casanovoutils mzmlutils input.mzML 0.1 sampled.mgf
 ```
 
 ### Load PSM data into a DataFrame
 
 ```bash
-casanovoutils denovo get_groundtruth input.mgf results.mztab \
+casanovoutils denovoutils get_groundtruth input.mgf results.mztab \
   --out_path groundtruth.parquet
+```
+
+### Compute precision-coverage metrics
+
+```bash
+casanovoutils preccov get_pc_df \
+  --mgf_df psms.parquet --mztab_df matches.parquet \
+  --out_path pc.parquet
+
+casanovoutils preccov graph_prec_cov pc.parquet --out_path pc_curve.png
+```
+
+### Summarise an MGF file
+
+```bash
+casanovoutils summarize_mgf summarize input.mgf --output_root my_report
+```
+
+### Create train/val/test splits
+
+```bash
+casanovoutils datasets input.mgf --output_root splits/run1
 ```
 
 ### Export the residue mass table
 
 ```bash
-casanovoutils dump-residues dump residues.yaml
+casanovoutils residues residues.yaml
 ```
 
 Edit `residues.yaml` to add custom modifications or non-standard residues,
