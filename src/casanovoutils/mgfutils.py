@@ -12,6 +12,7 @@ import logging
 import os
 import pathlib
 import random
+import re
 from os import PathLike
 from typing import Iterable, Optional
 
@@ -29,6 +30,7 @@ SpectraInput = PathLike | Iterable[PathLike] | Iterable[PyteomicsSpectrum]
 def iter_spectra(
     spectra: SpectraInput,
     desc: Optional[str] = None,
+    miniters: int = 1,
 ) -> Iterable[PyteomicsSpectrum]:
     """
     Normalize various spectrum input types to an iterable of PyteomicsSpectrum.
@@ -43,6 +45,8 @@ def iter_spectra(
     desc : str, optional
         Description for the tqdm progress bar. If ``None``, no progress bar
         is shown.
+    miniters : int, default=1
+        Minimum number of iterations between progress bar updates.
 
     Yields
     ------
@@ -67,7 +71,7 @@ def iter_spectra(
             raw = itertools.chain([first], it)
 
     if desc is not None:
-        raw = tqdm.tqdm(raw, desc=desc, unit="psm")
+        raw = tqdm.tqdm(raw, desc=desc, unit="psm", miniters=miniters)
 
     yield from raw
 
@@ -345,20 +349,48 @@ def pipeline(
 _VALID_DOWNSAMPLE_TYPES = frozenset({"number", "proportion"})
 
 
+def _group_key(spectrum, precursor=False, ignore_mods=False):
+    """Return the grouping key for reservoir sampling.
+
+    Parameters
+    ----------
+    spectrum : PyteomicsSpectrum
+        A single spectrum dict.
+    precursor : bool
+        If True, include the charge state in the key so that the same peptide
+        in different charge states is treated as distinct groups.
+    ignore_mods : bool
+        If True, strip ProForma bracketed modification annotations from the
+        sequence before forming the key.
+    """
+    seq = spectrum["params"]["seq"]
+    if ignore_mods:
+        seq = re.sub(r"\[.*?\]", "", seq).strip("-")
+    if precursor:
+        charge = spectrum["params"].get("charge", "")
+        # pyteomics returns ChargeList (a list subclass) for the charge field,
+        # which is unhashable. Convert to a canonical string for use as a key.
+        charge = str(charge)
+        return (seq, charge)
+    return seq
+
+
 def spectra_per_peptide(
     spectra: SpectraInput,
     outfile: Optional[PathLike] = None,
     k: int = 1,
+    precursor: bool = False,
+    ignore_mods: bool = False,
     random_seed: int = 42,
 ) -> list[PyteomicsSpectrum]:
     """
     Sample up to k spectra per peptide using reservoir sampling.
 
     Makes a single streaming pass through *spectra*, maintaining a reservoir
-    of size k per unique peptide sequence.  For the j-th occurrence of a
-    peptide: if j <= k, add unconditionally; if j > k, replace a uniformly
-    random reservoir slot with probability k/j.  Memory usage is
-    O(unique peptides × k) rather than O(total spectra).
+    of size k per unique group.  For the j-th occurrence of a group: if
+    j <= k, add unconditionally; if j > k, replace a uniformly random
+    reservoir slot with probability k/j.  Memory usage is
+    O(unique groups x k) rather than O(total spectra).
 
     Parameters
     ----------
@@ -367,40 +399,55 @@ def spectra_per_peptide(
     outfile : PathLike, optional
         If provided, write the sampled spectra to this MGF file path.
     k : int, default=1
-        Maximum number of spectra to retain per peptide sequence.
+        Maximum number of spectra to retain per group.
+    precursor : bool, default=False
+        If True, group by peptide sequence *and* charge state, so that the
+        same peptide observed in different charge states is treated as
+        separate groups.
+    ignore_mods : bool, default=False
+        If True, strip ProForma bracketed modification annotations (e.g.
+        ``[Acetyl]``, ``[Carbamidomethyl]``) from the sequence before
+        grouping, so modified and unmodified forms of the same peptide are
+        counted together.
     random_seed : int, default=42
         Seed for the local random number generator.
 
     Returns
     -------
     list[PyteomicsSpectrum]
-        Sampled spectra, grouped by peptide in first-seen order.
+        Sampled spectra, grouped by key in first-seen order.
     """
     if not isinstance(k, int) or k < 1:
         raise ValueError(f"--k must be a positive integer, got {k!r}.")
     configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
     logging.info(
-        "Sampling up to k=%d spectra per peptide (random_seed=%d)", k, random_seed
+        "Sampling up to k=%d spectra per %s (precursor=%s, ignore_mods=%s, "
+        "random_seed=%d)",
+        k,
+        "precursor" if precursor else "peptide",
+        precursor,
+        ignore_mods,
+        random_seed,
     )
 
     rng = random.Random(random_seed)
-    reservoir: dict[str, list[PyteomicsSpectrum]] = {}
-    counts: dict[str, int] = {}
+    reservoir: dict = {}
+    counts: dict = {}
 
-    for spectrum in iter_spectra(spectra, desc="Streaming spectra"):
-        seq = spectrum["params"]["seq"]
-        count = counts.get(seq, 0) + 1
-        counts[seq] = count
+    for spectrum in iter_spectra(spectra, desc="Streaming spectra", miniters=100_000):
+        key = _group_key(spectrum, precursor=precursor, ignore_mods=ignore_mods)
+        count = counts.get(key, 0) + 1
+        counts[key] = count
         if count <= k:
-            reservoir.setdefault(seq, []).append(spectrum)
+            reservoir.setdefault(key, []).append(spectrum)
         else:
             j = rng.randint(0, count - 1)
             if j < k:
-                reservoir[seq][j] = spectrum
+                reservoir[key][j] = spectrum
 
     result = list(itertools.chain.from_iterable(reservoir.values()))
     logging.info(
-        "Retained %d spectra from %d unique peptides", len(result), len(reservoir)
+        "Retained %d spectra from %d unique groups", len(result), len(reservoir)
     )
     write_spectra(result, outfile)
     return result
@@ -512,7 +559,7 @@ COMMANDS: Commands = {
 
 
 def main() -> None:
-    fire.Fire(COMMANDS)
+    fire.Fire(COMMANDS, serialize=lambda _: "")
 
 
 if __name__ == "__main__":
