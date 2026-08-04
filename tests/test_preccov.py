@@ -193,29 +193,39 @@ def test_calc_precision_coverage_output_columns(pc_input_df):
 
 
 def test_calc_precision_coverage_correctness_flag(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
+    result = calc_precision_coverage(
+        pc_input_df, Constants.pep_score_column, residues_path=None
+    )
     # sorted descending by score: A(0.9)=correct, B(0.8)=wrong, C(0.7)=correct, D(0.6)=wrong
     # correctness compares Constants.predicted_tokens against Constants.ground_truth_tokens
     assert result["pc_is_correct"].to_list() == [True, True, True, False]
 
 
 def test_calc_precision_coverage_precision_range(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
+    result = calc_precision_coverage(
+        pc_input_df, Constants.pep_score_column, residues_path=None
+    )
     assert all(0.0 <= p <= 1.0 for p in result[Constants.precision_column].to_list())
 
 
 def test_calc_precision_coverage_coverage_range(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
+    result = calc_precision_coverage(
+        pc_input_df, Constants.pep_score_column, residues_path=None
+    )
     assert all(0.0 <= c <= 1.0 for c in result[Constants.coverage_column].to_list())
 
 
 def test_calc_precision_coverage_ends_at_full_coverage(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
+    result = calc_precision_coverage(
+        pc_input_df, Constants.pep_score_column, residues_path=None
+    )
     assert result[Constants.coverage_column][-1] == pytest.approx(1.0)
 
 
 def test_calc_precision_coverage_sorted_descending(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
+    result = calc_precision_coverage(
+        pc_input_df, Constants.pep_score_column, residues_path=None
+    )
     scores = result[Constants.pep_score_column].to_list()
     assert scores == sorted(scores, reverse=True)
 

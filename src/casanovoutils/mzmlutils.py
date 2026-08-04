@@ -62,9 +62,7 @@ def _write_spectra(spectra: list[PyteomicsSpectrum], path: PathLike) -> None:
         out_iter = tqdm.tqdm(mgf_spectra, desc=f"Writing {path}", unit="spectrum")
         pyteomics.mgf.write(out_iter, output=str(path))
     else:
-        raise ValueError(
-            f"Unsupported output extension {suffix!r}; expected '.mgf'."
-        )
+        raise ValueError(f"Unsupported output extension {suffix!r}; expected '.mgf'.")
 
 
 def sample_mzml(
@@ -132,7 +130,7 @@ def sample_spectra(
 ) -> None:
     """
     Sample spectra from an mzML file and write them to an MGF file.
-    
+
     Note: writing to mzML is a pain so I didn't implement it here. If you need
     an mzML output I would recommend running this and then using msconvert
     to convert to mzML.
@@ -151,7 +149,9 @@ def sample_spectra(
         Seed for reproducible sampling.
     """
     configure_logging(pathlib.Path(outfile).with_suffix(".log"))
-    result = sample_mzml(input_file, k, buffer_size=buffer_size, random_seed=random_seed)
+    result = sample_mzml(
+        input_file, k, buffer_size=buffer_size, random_seed=random_seed
+    )
     _write_spectra(result, outfile)
 
 

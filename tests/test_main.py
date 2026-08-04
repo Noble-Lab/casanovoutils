@@ -13,7 +13,6 @@ import pytest
 
 import casanovoutils.main as main_mod
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -161,6 +160,6 @@ def test_real_package_commands_are_dicts_or_callables():
 
     fired = mock_fire.call_args[0][0]
     for key, value in fired.items():
-        assert isinstance(value, dict) or callable(value), (
-            f"COMMANDS for {key!r} must be a dict or callable, got {type(value)}"
-        )
+        assert isinstance(value, dict) or callable(
+            value
+        ), f"COMMANDS for {key!r} must be a dict or callable, got {type(value)}"

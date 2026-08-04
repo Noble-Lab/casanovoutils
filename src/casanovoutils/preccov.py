@@ -25,7 +25,7 @@ import logging
 import pathlib
 from os import PathLike
 from typing import Any, Optional
-from casanovo.denovo import evaluate as casanovo_evaluate 
+from casanovo.denovo import evaluate as casanovo_evaluate
 
 import fire
 import matplotlib.pyplot as plt
@@ -45,6 +45,7 @@ from .denovoutils import (
 )
 from .types import Commands
 from .residues import get_residues
+
 
 @dataclasses.dataclass
 class GraphPrecCov:
@@ -240,12 +241,13 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
     return row
 
+
 def calc_precision_coverage(
     pc_df: pl.DataFrame,
     score_col: str,
     cum_mass_threshold: float = 0.5,
     ind_mass_threshold: float = 0.1,
-    residues_path: Optional[PathLike] =None,
+    residues_path: Optional[PathLike] = None,
 ) -> pl.DataFrame:
     """
     Compute cumulative precision and coverage curves sorted by score.
@@ -279,7 +281,9 @@ def calc_precision_coverage(
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
 
-    logging.warning("If the predicted or ground truth peptides contain residues that are not present in the provided residues.yaml, the mass will default to 0 leading to potential false positives.")
+    logging.warning(
+        "If the predicted or ground truth peptides contain residues that are not present in the provided residues.yaml, the mass will default to 0 leading to potential false positives."
+    )
     aa_matches_batch, n_aa_pred, n_aa_true = casanovo_evaluate.aa_match_batch(
         pred_tokens,
         truth_tokens,
@@ -289,9 +293,7 @@ def calc_precision_coverage(
     )
     pep_matches = np.array([m[1] for m in aa_matches_batch], dtype=bool)
 
-    pc_df = pc_df.with_columns(
-        pl.Series("pc_is_correct", pep_matches)
-    )
+    pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))
 
     is_correct = pc_df.get_column("pc_is_correct").to_numpy()
 
@@ -324,6 +326,7 @@ def calc_precision_coverage(
     )
 
     return pc_df
+
 
 def load_ground_truth_df(
     ground_truth_df: Optional[DfPath],

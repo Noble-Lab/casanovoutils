@@ -4,7 +4,12 @@ import numpy as np
 import pyteomics.mgf
 import pytest
 
-from casanovoutils.mzmlutils import _to_mgf_spectrum, _write_spectra, sample_mzml, sample_spectra
+from casanovoutils.mzmlutils import (
+    _to_mgf_spectrum,
+    _write_spectra,
+    sample_mzml,
+    sample_spectra,
+)
 
 
 def make_spectrum(idx=0):
@@ -160,7 +165,9 @@ def test_sample_spectra_calls_mgf_write(tmp_path):
         patch("casanovoutils.mzmlutils.pyteomics.mgf.write") as mock_write,
     ):
         mock_mzml.return_value = _mzml_cm(spectra)
-        sample_spectra("dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42)
+        sample_spectra(
+            "dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42
+        )
     mock_write.assert_called_once()
 
 
@@ -172,7 +179,9 @@ def test_sample_spectra_returns_none(tmp_path):
         patch("casanovoutils.mzmlutils.pyteomics.mgf.write"),
     ):
         mock_mzml.return_value = _mzml_cm(spectra)
-        result = sample_spectra("dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42)
+        result = sample_spectra(
+            "dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42
+        )
     assert result is None
 
 
@@ -182,7 +191,9 @@ def test_sample_spectra_unsupported_extension_raises(tmp_path):
     with patch("casanovoutils.mzmlutils.pyteomics.mzml.MzML") as mock_mzml:
         mock_mzml.return_value = _mzml_cm(spectra)
         with pytest.raises(ValueError, match="Unsupported output extension"):
-            sample_spectra("dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42)
+            sample_spectra(
+                "dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42
+            )
 
 
 def test_sample_spectra_mzml_extension_raises(tmp_path):
@@ -191,7 +202,9 @@ def test_sample_spectra_mzml_extension_raises(tmp_path):
     with patch("casanovoutils.mzmlutils.pyteomics.mzml.MzML") as mock_mzml:
         mock_mzml.return_value = _mzml_cm(spectra)
         with pytest.raises(ValueError, match="Unsupported output extension"):
-            sample_spectra("dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42)
+            sample_spectra(
+                "dummy.mzML", k=0.5, outfile=outfile, buffer_size=10, random_seed=42
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +247,11 @@ def test_to_mgf_spectrum_with_precursor():
                 "selectedIonList": {
                     "count": 1,
                     "selectedIon": [
-                        {"selected ion m/z": 500.25, "peak intensity": 1e5, "charge state": 2}
+                        {
+                            "selected ion m/z": 500.25,
+                            "peak intensity": 1e5,
+                            "charge state": 2,
+                        }
                     ],
                 }
             }
