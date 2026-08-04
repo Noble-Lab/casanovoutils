@@ -19,6 +19,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "tabulate>=0.10.0",
     "tqdm>=4.67.1",
+    "casanovo>=5.0",
 ]
 
 [project.scripts]
