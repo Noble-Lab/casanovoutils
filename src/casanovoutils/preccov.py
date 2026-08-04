@@ -279,6 +279,7 @@ def calc_precision_coverage(
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
 
+    logging.warning("If the predicted or ground truth peptides contain residues that are not present in the provided residues.yaml, the mass will default to 0 leading to potential false positives.")
     aa_matches_batch, n_aa_pred, n_aa_true = casanovo_evaluate.aa_match_batch(
         pred_tokens,
         truth_tokens,
@@ -621,7 +622,7 @@ def get_prec_cov_df(
 
     score_col = Constants.aa_scores_column if aa_level else Constants.pep_score_column
     logging.debug("Computing precision-coverage with score column '%s'", score_col)
-    pc_df = calc_precision_coverage(pc_df, score_col)
+    pc_df = calc_precision_coverage(pc_df, score_col, residues_path=residues_path)
 
     logging.info(
         "Precision-coverage DataFrame complete: %d rows, %d columns",
