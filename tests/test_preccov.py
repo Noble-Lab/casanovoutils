@@ -205,17 +205,17 @@ def test_calc_precision_coverage_precision_range(pc_input_df):
 
 
 def test_calc_precision_coverage_coverage_range(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
     assert all(0.0 <= c <= 1.0 for c in result[Constants.coverage_column].to_list())
 
 
 def test_calc_precision_coverage_ends_at_full_coverage(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
     assert result[Constants.coverage_column][-1] == pytest.approx(1.0)
 
 
 def test_calc_precision_coverage_sorted_descending(pc_input_df):
-    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
+    result = calc_precision_coverage(pc_input_df, Constants.pep_score_column, residues_path=None)
     scores = result[Constants.pep_score_column].to_list()
     assert scores == sorted(scores, reverse=True)
 
@@ -229,7 +229,7 @@ def test_calc_precision_coverage_all_correct():
             Constants.aa_scores_column: ["", "", ""],
         }
     )
-    result = calc_precision_coverage(df, Constants.pep_score_column)
+    result = calc_precision_coverage(df, Constants.pep_score_column, residues_path=None)
     assert all(
         p == pytest.approx(1.0) for p in result[Constants.precision_column].to_list()
     )
@@ -244,7 +244,7 @@ def test_calc_precision_coverage_all_wrong():
             Constants.aa_scores_column: ["", "", ""],
         }
     )
-    result = calc_precision_coverage(df, Constants.pep_score_column)
+    result = calc_precision_coverage(df, Constants.pep_score_column, residues_path=None)
     assert all(
         p == pytest.approx(0.0) for p in result[Constants.precision_column].to_list()
     )
