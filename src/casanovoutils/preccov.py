@@ -281,9 +281,8 @@ def calc_precision_coverage(
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
 
-    logging.warning(
-        "If the predicted or ground truth peptides contain residues that are not present in the provided residues.yaml, the mass will default to 0 leading to potential false positives."
-    )
+    logging.warning("Ensure all residues in predicted peptides or ground truth" \
+    "peptides are in residues.yaml")
     aa_matches_batch, n_aa_pred, n_aa_true = casanovo_evaluate.aa_match_batch(
         pred_tokens,
         truth_tokens,
