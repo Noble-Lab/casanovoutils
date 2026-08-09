@@ -324,7 +324,10 @@ def get_mztab_df(
     -------
     pl.DataFrame
         A DataFrame with one row per spectrum match and columns prefixed
-        with ``mztab_``.
+        with ``mztab_``.  Any ``mztab_opt_global_*`` columns that do not
+        already have a corresponding ``mztab_opt_ms_run[1]_*`` counterpart
+        are renamed to the ``mztab_opt_ms_run[1]_*`` form so that downstream
+        code is insulated from the pyteomics version that produced the table.
     """
     if isinstance(mztab_path, pl.DataFrame):
         if out_path is not None:
@@ -339,6 +342,26 @@ def get_mztab_df(
     result = pl.from_pandas(result)
     logging.info("Read %d spectrum matches from %s", len(result), str(mztab_path))
     result = result.rename({c: f"mztab_{c}" for c in result.columns})
+
+    # Newer versions of pyteomics preserve ``opt_global_*`` column names as-is,
+    # whereas older versions expanded them to ``opt_ms_run[1]_*``.  Rename any
+    # ``mztab_opt_global_*`` column to ``mztab_opt_ms_run[1]_*`` so that
+    # downstream code (which expects the ``opt_ms_run[1]_*`` form) keeps working
+    # regardless of the pyteomics version in use.  If a column already exists
+    # under the ``opt_ms_run[1]_*`` name it is left untouched.
+    global_rename = {}
+    for col in result.columns:
+        if col.startswith("mztab_opt_global_"):
+            suffix = col[len("mztab_opt_global_"):]
+            new_name = f"mztab_opt_ms_run[1]_{suffix}"
+            if new_name not in result.columns:
+                global_rename[col] = new_name
+    if global_rename:
+        logging.debug(
+            "Renaming opt_global_* columns to opt_ms_run[1]_*: %s",
+            list(global_rename.keys()),
+        )
+        result = result.rename(global_rename)
 
     if out_path is not None:
         logging.info("Writing mzTab DataFrame to %s", str(out_path))
