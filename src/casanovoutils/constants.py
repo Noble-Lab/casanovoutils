@@ -83,23 +83,30 @@ class Constants:
         """
         Determine the name of the predicted sequence column.
 
-        Checks for the presence of a ProForma-formatted prediction column first,
-        falling back to the plain mzTab sequence column if it is absent.
+        Checks for ProForma-formatted prediction columns first (preferred,
+        because they carry modification annotations), falling back to the
+        plain mzTab sequence column if none is found.
+
+        Two ProForma column naming conventions are supported:
+
+        - ``"mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"``
+          — written by current Casanovo (uses the CV-term name and the
+          spec-correct ``opt_global_*`` prefix).
+        - ``"mztab_opt_ms_run[1]_proforma"`` — written by older Casanovo
+          versions.
 
         Parameters
         ----------
         df : pl.DataFrame
-            A DataFrame expected to contain either
-            ``"mztab_opt_ms_run[1]_proforma"`` or ``"mztab_sequence"``.
+            A DataFrame expected to contain a predicted sequence column.
 
         Returns
         -------
         str
             The name of the predicted sequence column.
         """
+        if "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence" in df.columns:
+            return "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"
         if "mztab_opt_ms_run[1]_proforma" in df.columns:
-            pred_col = "mztab_opt_ms_run[1]_proforma"
-        else:
-            pred_col = "mztab_sequence"
-
-        return pred_col
+            return "mztab_opt_ms_run[1]_proforma"
+        return "mztab_sequence"
