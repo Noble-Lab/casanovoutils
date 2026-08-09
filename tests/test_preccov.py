@@ -248,3 +248,36 @@ def test_calc_precision_coverage_all_wrong():
     assert all(
         p == pytest.approx(0.0) for p in result[Constants.precision_column].to_list()
     )
+
+
+# ── tests for Constants.get_aa_scores_column ─────────────────────────────────
+
+
+def test_get_aa_scores_column_opt_global():
+    """opt_global_aa_scores (current pyteomics) is detected correctly."""
+    df = pl.DataFrame({"mztab_opt_global_aa_scores": ["0.9,0.8"]})
+    assert Constants.get_aa_scores_column(df) == "mztab_opt_global_aa_scores"
+
+
+def test_get_aa_scores_column_opt_ms_run():
+    """opt_ms_run[1]_aa_scores (older pyteomics) is detected as fallback."""
+    df = pl.DataFrame({"mztab_opt_ms_run[1]_aa_scores": ["0.9,0.8"]})
+    assert Constants.get_aa_scores_column(df) == "mztab_opt_ms_run[1]_aa_scores"
+
+
+def test_get_aa_scores_column_prefers_opt_global():
+    """opt_global_* is preferred when both columns are present."""
+    df = pl.DataFrame(
+        {
+            "mztab_opt_global_aa_scores": ["0.9,0.8"],
+            "mztab_opt_ms_run[1]_aa_scores": ["0.9,0.8"],
+        }
+    )
+    assert Constants.get_aa_scores_column(df) == "mztab_opt_global_aa_scores"
+
+
+def test_get_aa_scores_column_raises_when_missing():
+    """ValueError is raised when neither column variant is present."""
+    df = pl.DataFrame({"mztab_sequence": ["PEPTIDE"]})
+    with pytest.raises(ValueError, match="mztab_opt_global_aa_scores"):
+        Constants.get_aa_scores_column(df)
