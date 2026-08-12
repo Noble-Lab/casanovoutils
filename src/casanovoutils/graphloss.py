@@ -322,6 +322,7 @@ def plot(
         input_path = Path(input_str)
         try:
             train_loss_list, val_loss_list = read_from_file(input_path)
+            lr_list = read_lr_from_file(input_path) if show_lr else []
         except (OSError, ValueError) as exc:
             logging.error("Error reading %s: %s", input_path, exc)
             raise SystemExit(2) from exc
@@ -334,7 +335,7 @@ def plot(
         train_loss_lists.append(train_loss_list)
         val_loss_lists.append(val_loss_list)
         if show_lr:
-            lr_lists.append(read_lr_from_file(input_path))
+            lr_lists.append(lr_list)
 
     if not any_points:
         logging.error("No loss entries found in any input file; nothing to plot.")
