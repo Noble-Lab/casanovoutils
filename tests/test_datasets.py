@@ -707,7 +707,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -724,7 +724,7 @@ class TestCreateDatasetsIsobaricNormalization:
         )
 
     def test_il_variants_counted_as_one_peptide(self, tmp_path):
-        """With normalize_isobaric=True, I/L variants count as a single peptide."""
+        """I/L variants count as a single peptide due to isobaric normalization."""
         # 10 I/L pairs + 80 unique = 90 sequences but only 80+10=90 canonical
         # peptides... actually each pair shares a canonical form, so 10 pairs
         # contribute 10 canonical peptides rather than 20.
@@ -737,7 +737,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -761,39 +761,41 @@ class TestCreateDatasetsIsobaricNormalization:
                 f"I/L pair PEP{i}I / PEP{i}L must be in the same split"
             )
 
-    def test_normalize_isobaric_false_treats_variants_independently(self, tmp_path):
-        """With normalize_isobaric=False, I/L variants are treated as distinct peptides."""
-        # With a fixed random seed and enough peptides, I/L variants CAN end up
-        # in different splits when normalization is off. We verify that the two
-        # sequences are treated as independent (i.e. both appear in the output).
+    def test_isobaric_normalization_is_unconditional(self, tmp_path):
+        """Isobaric normalization is always applied; there is no opt-out."""
+        # Verify that PEPTIDE and PEPTLDE (I/L variants) always land in the
+        # same split regardless of how create_datasets is called.
         spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
         for i in range(28):
             spectra.append((f"OTHER{i}", [100.0], [1.0]))
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=False)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
         test = _read_mgf(tmp_path / "out.test.mgf")
 
-        all_seqs = _get_peptides(train + val + test)
-        # Both sequences appear in the output regardless of normalization.
-        assert "PEPTIDE" in all_seqs
-        assert "PEPTLDE" in all_seqs
-        # Total spectra preserved.
-        assert len(all_seqs) == len(spectra)
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        assert find_split("PEPTIDE") == find_split("PEPTLDE")
+        # All spectra are preserved.
+        assert len(train) + len(val) + len(test) == len(spectra)
 
     def test_original_sequences_preserved_in_output(self, tmp_path):
-        """Output MGF files retain original sequences even when normalize_isobaric=True."""
+        """Output MGF files retain original sequences despite isobaric normalization."""
         spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
         for i in range(28):
             spectra.append((f"OTHER{i}", [100.0], [1.0]))
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -837,7 +839,6 @@ class TestCreateDatasetsIsobaricNormalization:
             mgf,
             output_root=output_root,
             existing_splits=existing,
-            normalize_isobaric=True,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -853,15 +854,14 @@ class TestCreateDatasetsIsobaricNormalization:
         assert "PEPTIDE" not in val_seqs
         assert "PEPTIDE" not in test_seqs
 
-    def test_il_normalization_default_is_true(self, tmp_path):
-        """normalize_isobaric defaults to True (I/L variants placed in same split)."""
+    def test_il_normalization_always_applied(self, tmp_path):
+        """I/L variants are always placed in the same split."""
         spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
         for i in range(28):
             spectra.append((f"OTHER{i}", [100.0], [1.0]))
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        # Call without normalize_isobaric — should default to True.
         create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -889,7 +889,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -916,7 +916,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -945,7 +945,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -973,7 +973,7 @@ class TestCreateDatasetsIsobaricNormalization:
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
         output_root = str(tmp_path / "out")
 
-        create_datasets(mgf, output_root=output_root, normalize_isobaric=True)
+        create_datasets(mgf, output_root=output_root)
 
         train = _read_mgf(tmp_path / "out.train.mgf")
         val = _read_mgf(tmp_path / "out.val.mgf")
@@ -1012,7 +1012,6 @@ class TestCreateDatasetsIsobaricNormalization:
             mgf,
             output_root=output_root,
             existing_splits=existing,
-            normalize_isobaric=True,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
