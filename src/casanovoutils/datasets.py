@@ -42,7 +42,19 @@ def _canonical(seq: str) -> str:
     str
         Canonical peptide sequence.
     """
-    seq = seq.replace("I", "L")
+    # Replace I with L only at residue positions (bracket depth 0), so that
+    # uppercase I characters inside modification names are left untouched.
+    chars = []
+    depth = 0
+    for ch in seq:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        elif ch == "I" and depth == 0:
+            ch = "L"
+        chars.append(ch)
+    seq = "".join(chars)
     seq = seq.replace("N[Deamidated]", "D")
     seq = seq.replace("Q[Deamidated]", "E")
     return seq
