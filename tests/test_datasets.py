@@ -692,3 +692,188 @@ class TestCreateDatasetsExistingSplits:
                 existing_splits=existing,
                 combine_with_existing=True,
             )
+
+
+class TestCreateDatasetsILNormalization:
+    """Tests for I/L normalization during splitting."""
+
+    def test_il_variants_land_in_same_split(self, tmp_path):
+        """Peptides differing only by I/L are placed in the same split."""
+        # PEPTIDE and PEPTLDE are I/L variants of each other.
+        # Add enough unrelated peptides to trigger real splitting.
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, normalize_il=True)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for split_name, split in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in split):
+                    return split_name
+            return None
+
+        assert find_split("PEPTIDE") == find_split("PEPTLDE"), (
+            "I/L variants must land in the same split"
+        )
+
+    def test_il_variants_counted_as_one_peptide(self, tmp_path):
+        """With normalize_il=True, I/L variants count as a single peptide."""
+        # 10 I/L pairs + 80 unique = 90 sequences but only 80+10=90 canonical
+        # peptides... actually each pair shares a canonical form, so 10 pairs
+        # contribute 10 canonical peptides rather than 20.
+        spectra = []
+        for i in range(10):
+            spectra.append((f"PEP{i}I", [100.0], [1.0]))  # with I
+            spectra.append((f"PEP{i}L", [100.0], [1.0]))  # same canonical
+        for i in range(80):
+            spectra.append((f"UNIQ{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, normalize_il=True)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        # Total spectra must be preserved.
+        assert len(train) + len(val) + len(test) == len(spectra)
+
+        # Each I/L pair must be in the same split.
+        for i in range(10):
+            i_seq = f"PEP{i}I"
+            l_seq = f"PEP{i}L"
+
+            def find_split(seq, tr=train, v=val, te=test):
+                for name, sp in [("train", tr), ("val", v), ("test", te)]:
+                    if any(s["params"]["seq"] == seq for s in sp):
+                        return name
+                return None
+
+            assert find_split(i_seq) == find_split(l_seq), (
+                f"I/L pair PEP{i}I / PEP{i}L must be in the same split"
+            )
+
+    def test_normalize_il_false_treats_variants_independently(self, tmp_path):
+        """With normalize_il=False, I/L variants are treated as distinct peptides."""
+        # With a fixed random seed and enough peptides, I/L variants CAN end up
+        # in different splits when normalization is off. We verify that the two
+        # sequences are treated as independent (i.e. both appear in the output).
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, normalize_il=False)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        all_seqs = _get_peptides(train + val + test)
+        # Both sequences appear in the output regardless of normalization.
+        assert "PEPTIDE" in all_seqs
+        assert "PEPTLDE" in all_seqs
+        # Total spectra preserved.
+        assert len(all_seqs) == len(spectra)
+
+    def test_original_sequences_preserved_in_output(self, tmp_path):
+        """Output MGF files retain original sequences even when normalize_il=True."""
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root, normalize_il=True)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        all_seqs = set(_get_peptides(train + val + test))
+        # Original sequences (not canonical) must appear in the output.
+        assert "PEPTIDE" in all_seqs
+        assert "PEPTLDE" in all_seqs
+        # The canonical form should NOT appear as a distinct entry
+        # (it was never an input sequence).
+        assert "PEPTLDE" in all_seqs  # L-only form is a real input sequence
+        # Make sure we didn't accidentally replace sequences in the output.
+        assert "PEPTIDE" in all_seqs  # I-form must still be present
+
+    def test_il_normalization_with_existing_splits(self, tmp_path):
+        """I/L variant in new data routes to the correct existing split."""
+        # Existing train split contains PEPTLDE (L-form).
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("PEPTLDE", [100.0], [1.0])] + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [(f"VA{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [(f"TE{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        existing = (train_path, val_path, test_path)
+
+        # New data has PEPTIDE (I-form), the I/L variant of PEPTLDE.
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("PEPTIDE", [100.0], [1.0])] + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+            normalize_il=True,
+        )
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        train_seqs = set(_get_peptides(train))
+        val_seqs = set(_get_peptides(val))
+        test_seqs = set(_get_peptides(test))
+
+        # PEPTIDE (I-form) must land in train alongside PEPTLDE (L-form).
+        assert "PEPTIDE" in train_seqs, "I-form should follow L-form into train"
+        assert "PEPTIDE" not in val_seqs
+        assert "PEPTIDE" not in test_seqs
+
+    def test_il_normalization_default_is_true(self, tmp_path):
+        """normalize_il defaults to True (I/L variants placed in same split)."""
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        # Call without normalize_il — should default to True.
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        assert find_split("PEPTIDE") == find_split("PEPTLDE"), (
+            "Default behavior must place I/L variants in the same split"
+        )

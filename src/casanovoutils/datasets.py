@@ -17,8 +17,31 @@ from .types import Commands
 _WRITE_BUFFER_SIZE = 1000
 
 
+def _canonical(seq: str, normalize_il: bool) -> str:
+    """Return the canonical form of a peptide sequence.
+
+    When *normalize_il* is True, isoleucine (I) is replaced with leucine (L)
+    so that sequences that are indistinguishable by mass spectrometry are
+    treated as identical during splitting.
+
+    Parameters
+    ----------
+    seq : str
+        Peptide sequence.
+    normalize_il : bool
+        If True, replace I with L.
+
+    Returns
+    -------
+    str
+        Canonical peptide sequence.
+    """
+    return seq.replace("I", "L") if normalize_il else seq
+
+
 def _collect_peptide_counts(
     mgf_files: tuple[PathLike, ...],
+    normalize_il: bool = True,
 ) -> tuple[dict[str, int], int]:
     """Pass 1: stream all input MGF files and count spectra per peptide.
 
@@ -30,7 +53,7 @@ def _collect_peptide_counts(
     Returns
     -------
     pep_counts : dict[str, int]
-        Mapping of peptide sequence to spectrum count.
+        Mapping of canonical peptide sequence to spectrum count.
     total_spectra : int
         Total number of spectra read across all files.
     """
@@ -53,7 +76,8 @@ def _collect_peptide_counts(
                     f"Missing 'seq' in spectrum params for spectrum "
                     f"{spectrum_index} in file {mgf_file}"
                 ) from exc
-            pep_counts[seq] = pep_counts.get(seq, 0) + 1
+            key = _canonical(seq, normalize_il)
+            pep_counts[key] = pep_counts.get(key, 0) + 1
             file_count += 1
         logging.info(f"Read {file_count} spectra from {mgf_file}.")
         total_spectra += file_count
@@ -68,6 +92,7 @@ def _assign_splits(
     total_spectra: int,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     spectra_per_peptide: Optional[int],
+    normalize_il: bool = True,
 ) -> tuple[dict[str, str], dict[str, set[int]], dict[str, set[str]]]:
     """Compute per-peptide split assignments and sampling indices.
 
@@ -83,11 +108,15 @@ def _assign_splits(
         Paths to existing train/val/test MGF files, or None.
     spectra_per_peptide : int or None
         Maximum spectra to retain per peptide, or None.
+    normalize_il : bool, default=True
+        If True, isoleucine (I) is replaced with leucine (L) when comparing
+        peptide sequences, matching the behavior of ``_collect_peptide_counts``.
 
     Returns
     -------
     pep_to_split : dict[str, str]
-        Mapping of peptide sequence to split name ("train", "val", "test").
+        Mapping of canonical peptide sequence to split name
+        ("train", "val", "test").
     sampled_indices : dict[str, set[int]]
         For peptides that exceed spectra_per_peptide, the 0-based indices
         of spectra to retain. Empty dict if spectra_per_peptide is None.
@@ -142,7 +171,7 @@ def _assign_splits(
                         f"existing split '{split_name}' from file "
                         f"'{split_path}'"
                     ) from exc
-                existing_peps[split_name].add(seq)
+                existing_peps[split_name].add(_canonical(seq, normalize_il))
             logging.info(
                 f"Existing {split_name}: "
                 f"{len(existing_peps[split_name])} peptide"
@@ -296,6 +325,7 @@ def _write_splits(
     spectra_per_peptide: Optional[int],
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     combine_with_existing: bool,
+    normalize_il: bool = True,
 ) -> tuple[dict[str, int], dict[str, set[str]]]:
     """Pass 2: stream spectra to output MGF files.
 
@@ -315,6 +345,10 @@ def _write_splits(
         Paths to existing split files, required when combine_with_existing.
     combine_with_existing : bool
         If True, prepend existing split spectra to each output file.
+    normalize_il : bool, default=True
+        If True, isoleucine (I) is replaced with leucine (L) when looking up
+        each spectrum's split assignment. Original sequences are preserved in
+        the output MGF files.
 
     Returns
     -------
@@ -392,18 +426,19 @@ def _write_splits(
                 unit="PSM",
             ):
                 seq = spectrum["params"]["seq"]
+                key = _canonical(seq, normalize_il)
 
                 # Apply spectra_per_peptide filtering.
                 if spectra_per_peptide is not None:
-                    idx = pep_counters.get(seq, 0)
-                    pep_counters[seq] = idx + 1
-                    if seq in sampled_indices:
-                        if idx not in sampled_indices[seq]:
+                    idx = pep_counters.get(key, 0)
+                    pep_counters[key] = idx + 1
+                    if key in sampled_indices:
+                        if idx not in sampled_indices[key]:
                             continue
-                    # If seq not in sampled_indices, count <= limit,
+                    # If key not in sampled_indices, count <= limit,
                     # so keep all.
 
-                split_name = pep_to_split.get(seq)
+                split_name = pep_to_split.get(key)
                 if split_name is not None:
                     write_spectrum(split_name, spectrum)
 
@@ -422,6 +457,7 @@ def create_datasets(
     overwrite: bool = False,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]] = None,
     combine_with_existing: bool = False,
+    normalize_il: bool = True,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
@@ -430,6 +466,13 @@ def create_datasets(
     validation (10%), and test (10%) sets. Spectra are then assigned to splits
     based on their associated peptide, ensuring no peptide-level leakage
     between splits.
+
+    Because mass spectrometry cannot distinguish isoleucine (I) from leucine
+    (L), peptides that differ only at I/L positions are indistinguishable and
+    should always be placed in the same split. By default (``normalize_il=True``)
+    the splitting key replaces I with L before grouping, so all I/L variants of
+    a peptide are treated as one entity. The original sequences are preserved
+    unchanged in the output MGF files.
 
     Parameters
     ----------
@@ -458,6 +501,11 @@ def create_datasets(
     combine_with_existing : bool, default=False
         If True, output MGF files include both existing and new spectra.
         If False, only new spectra are written.
+    normalize_il : bool, default=True
+        If True, isoleucine (I) is replaced with leucine (L) when grouping
+        peptides for splitting. This prevents train/test leakage between
+        peptides that are indistinguishable by mass spectrometry. Original
+        sequences are preserved in the output MGF files.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
@@ -491,13 +539,14 @@ def create_datasets(
 
     random.seed(random_seed)
 
-    pep_counts, total_spectra = _collect_peptide_counts(mgf_files)
+    pep_counts, total_spectra = _collect_peptide_counts(mgf_files, normalize_il)
 
     pep_to_split, sampled_indices, existing_peps = _assign_splits(
         pep_counts,
         total_spectra,
         existing_splits,
         spectra_per_peptide,
+        normalize_il,
     )
 
     split_spectra_counts, split_pep_sets = _write_splits(
@@ -508,6 +557,7 @@ def create_datasets(
         spectra_per_peptide,
         existing_splits,
         combine_with_existing,
+        normalize_il,
     )
 
     # Log split summaries.
