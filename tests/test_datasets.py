@@ -802,14 +802,9 @@ class TestCreateDatasetsIsobaricNormalization:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_seqs = set(_get_peptides(train + val + test))
-        # Original sequences (not canonical) must appear in the output.
+        # Original sequences (not their canonical forms) must be preserved.
         assert "PEPTIDE" in all_seqs
         assert "PEPTLDE" in all_seqs
-        # The canonical form should NOT appear as a distinct entry
-        # (it was never an input sequence).
-        assert "PEPTLDE" in all_seqs  # L-only form is a real input sequence
-        # Make sure we didn't accidentally replace sequences in the output.
-        assert "PEPTIDE" in all_seqs  # I-form must still be present
 
     def test_il_normalization_with_existing_splits(self, tmp_path):
         """I/L variant in new data routes to the correct existing split."""
@@ -881,7 +876,7 @@ class TestCreateDatasetsIsobaricNormalization:
     def test_deamidated_n_and_d_land_in_same_split(self, tmp_path):
         """N[Deamidated] and D variants of the same peptide land in the same split."""
         spectra = [
-            ("PEPT[N[Deamidated]]DE", [100.0], [1.0]),
+            ("PEPTN[Deamidated]DE", [100.0], [1.0]),
             ("PEPTDDE", [100.0], [1.0]),
         ]
         for i in range(28):
@@ -901,14 +896,14 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPT[N[Deamidated]]DE") == find_split("PEPTDDE"), (
+        assert find_split("PEPTN[Deamidated]DE") == find_split("PEPTDDE"), (
             "N[Deamidated] and D variants must land in the same split"
         )
 
     def test_deamidated_q_and_e_land_in_same_split(self, tmp_path):
         """Q[Deamidated] and E variants of the same peptide land in the same split."""
         spectra = [
-            ("PEPT[Q[Deamidated]]DE", [100.0], [1.0]),
+            ("PEPTQ[Deamidated]DE", [100.0], [1.0]),
             ("PEPTEDE", [100.0], [1.0]),
         ]
         for i in range(28):
@@ -928,7 +923,7 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPT[Q[Deamidated]]DE") == find_split("PEPTEDE"), (
+        assert find_split("PEPTQ[Deamidated]DE") == find_split("PEPTEDE"), (
             "Q[Deamidated] and E variants must land in the same split"
         )
 
@@ -965,7 +960,7 @@ class TestCreateDatasetsIsobaricNormalization:
     def test_deamidation_normalization_preserves_original_sequences(self, tmp_path):
         """Output MGFs retain original sequences even with deamidation normalization."""
         spectra = [
-            ("PEPT[N[Deamidated]]DE", [100.0], [1.0]),
+            ("PEPTN[Deamidated]DE", [100.0], [1.0]),
             ("PEPTDDE", [100.0], [1.0]),
         ]
         for i in range(28):
@@ -980,7 +975,7 @@ class TestCreateDatasetsIsobaricNormalization:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_seqs = set(_get_peptides(train + val + test))
-        assert "PEPT[N[Deamidated]]DE" in all_seqs, (
+        assert "PEPTN[Deamidated]DE" in all_seqs, (
             "Original N[Deamidated] sequence must be preserved in output"
         )
         assert "PEPTDDE" in all_seqs
@@ -1003,7 +998,7 @@ class TestCreateDatasetsIsobaricNormalization:
 
         mgf = _write_mgf(
             tmp_path / "new.mgf",
-            [("PEPT[N[Deamidated]]DE", [100.0], [1.0])]
+            [("PEPTN[Deamidated]DE", [100.0], [1.0])]
             + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
         )
         output_root = str(tmp_path / "out")
@@ -1022,8 +1017,8 @@ class TestCreateDatasetsIsobaricNormalization:
         val_seqs = set(_get_peptides(val))
         test_seqs = set(_get_peptides(test))
 
-        assert "PEPT[N[Deamidated]]DE" in train_seqs, (
+        assert "PEPTN[Deamidated]DE" in train_seqs, (
             "N[Deamidated]-form should follow D-form into train"
         )
-        assert "PEPT[N[Deamidated]]DE" not in val_seqs
-        assert "PEPT[N[Deamidated]]DE" not in test_seqs
+        assert "PEPTN[Deamidated]DE" not in val_seqs
+        assert "PEPTN[Deamidated]DE" not in test_seqs
