@@ -898,8 +898,12 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPTN[Deamidated]DE") == find_split(
-            "PEPTDDE"
+        split_n = find_split("PEPTN[Deamidated]DE")
+        split_d = find_split("PEPTDDE")
+        assert split_n is not None, "PEPTN[Deamidated]DE not found in any split"
+        assert split_d is not None, "PEPTDDE not found in any split"
+        assert (
+            split_n == split_d
         ), "N[Deamidated] and D variants must land in the same split"
 
     def test_deamidated_q_and_e_land_in_same_split(self, tmp_path):
@@ -925,8 +929,12 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPTQ[Deamidated]DE") == find_split(
-            "PEPTEDE"
+        split_q = find_split("PEPTQ[Deamidated]DE")
+        split_e = find_split("PEPTEDE")
+        assert split_q is not None, "PEPTQ[Deamidated]DE not found in any split"
+        assert split_e is not None, "PEPTEDE not found in any split"
+        assert (
+            split_q == split_e
         ), "Q[Deamidated] and E variants must land in the same split"
 
     def test_all_three_normalizations_together(self, tmp_path):
@@ -954,7 +962,13 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("IN[Deamidated]Q[Deamidated]K") == find_split("LDEK"), (
+        split_inqk = find_split("IN[Deamidated]Q[Deamidated]K")
+        split_ldek = find_split("LDEK")
+        assert (
+            split_inqk is not None
+        ), "IN[Deamidated]Q[Deamidated]K not found in any split"
+        assert split_ldek is not None, "LDEK not found in any split"
+        assert split_inqk == split_ldek, (
             "Peptide with I, N[Deamidated], and Q[Deamidated] must land in "
             "the same split as its canonical D/E/L form"
         )
