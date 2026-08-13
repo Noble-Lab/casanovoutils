@@ -44,7 +44,7 @@ class TestConvertSeqNterminal:
         assert result == "[+28.031]-PEPTIDE"
 
     def test_unknown_nterm_negative(self):
-        """An unknown negative N-terminal shift is formatted as [mass]-."""
+        """An unknown negative N-terminal shift is formatted as [-mass]-."""
         result = _convert_seq("-18.011PEPTIDE")
         assert result == "[-18.011]-PEPTIDE"
 

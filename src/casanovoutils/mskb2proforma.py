@@ -18,7 +18,7 @@ from .types import Commands
 # all other entries are written as named tokens (e.g. "[Acetyl]-").
 _NTERM_NAMES: dict[float, str] = {
     -17.027: "Ammonia-loss",
-    25.979: "+25.980265",   # Carbamyl (+43.006) + Ammonia-loss (-17.027)
+    25.979: "+25.980265",  # Carbamyl (+43.006) + Ammonia-loss (-17.027)
     42.011: "Acetyl",
     43.006: "Carbamyl",
 }
@@ -73,15 +73,18 @@ def _convert_seq(seq: str) -> str:
     m = _LEADING_SHIFTS_RE.match(seq)
     if m:
         nterm_str = m.group(1)
-        seq = seq[len(nterm_str):]
+        seq = seq[len(nterm_str) :]
         total = round(sum(float(s) for s in _SHIFT_RE.findall(nterm_str)), 3)
-        if total in _NTERM_NAMES:
-            label = _NTERM_NAMES[total]
-        elif total >= 0:
-            label = f"+{total:.3f}"
+        # Canonicalize -0.0 → 0.0; a zero net shift needs no N-terminal token.
+        total = total + 0.0
+        if total == 0.0:
+            pass  # net shift is zero — no N-terminal modification token needed
+        elif total in _NTERM_NAMES:
+            nterm = f"[{_NTERM_NAMES[total]}]-"
+        elif total > 0:
+            nterm = f"[+{total:.3f}]-"
         else:
-            label = f"{total:.3f}"
-        nterm = f"[{label}]-"
+            nterm = f"[{total:.3f}]-"
 
     # Split into per-residue tokens and convert each one.
     out_tokens = []
