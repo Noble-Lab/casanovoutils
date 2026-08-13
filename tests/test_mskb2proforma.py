@@ -48,6 +48,10 @@ class TestConvertSeqNterminal:
         result = _convert_seq("-18.011PEPTIDE")
         assert result == "[-18.011]-PEPTIDE"
 
+    def test_zero_nterm_shift_omitted(self):
+        """A net N-terminal shift of zero produces no N-terminal token."""
+        assert _convert_seq("+17.027-17.027PEPTIDE") == "PEPTIDE"
+
     def test_combined_tmt_acetyl(self):
         """+229.163+42.011 sums to +271.174, producing one numeric token."""
         result = _convert_seq("+229.163+42.011PEPTIDE")
@@ -65,9 +69,9 @@ class TestConvertSeqNterminal:
         assert result == "[+212.136]-PEPTIDE"
 
     def test_combined_carbamyl_ammonia_loss_named(self):
-        """+43.006-17.027 == +25.979 maps to the named token +25.980265."""
+        """+43.006-17.027 == +25.979 maps to the named token +25.979265."""
         result = _convert_seq("+43.006-17.027PEPTIDE")
-        assert result == "[+25.980265]-PEPTIDE"
+        assert result == "[+25.979265]-PEPTIDE"
 
     def test_combined_labeling_with_residues(self):
         """Combined N-term mod summed correctly alongside per-residue mods."""

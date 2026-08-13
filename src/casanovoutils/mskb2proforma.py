@@ -14,11 +14,11 @@ from .types import Commands
 
 # Named N-terminal modifications keyed by their summed mass in daltons,
 # rounded to 3 decimal places.  Entries with a string value starting with
-# "+" or "-" are written as numeric ProForma tokens (e.g. "[+25.980265]-");
+# "+" or "-" are written as numeric ProForma tokens (e.g. "[+25.979265]-");
 # all other entries are written as named tokens (e.g. "[Acetyl]-").
 _NTERM_NAMES: dict[float, str] = {
     -17.027: "Ammonia-loss",
-    25.979: "+25.980265",  # Carbamyl (+43.006) + Ammonia-loss (-17.027)
+    25.979: "+25.979265",  # Carbamyl (+43.006) + Ammonia-loss (-17.027)
     42.011: "Acetyl",
     43.006: "Carbamyl",
 }
@@ -174,11 +174,15 @@ def convert(
                 n_skipped += 1
         return {**spectrum, "params": params}
 
-    with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
+    with pyteomics.mgf.read(
+        str(input_file), use_index=False, use_header=False
+    ) as reader:
+        header = reader.header
         spectra = tqdm.tqdm(reader, desc="Converting spectra", unit="spectrum")
         pyteomics.mgf.write(
             (_convert_spectrum(s) for s in spectra),
             output=str(output_file),
+            header=header,
         )
 
     logging.info("Converted %d spectra", n_converted)
