@@ -719,9 +719,9 @@ class TestCreateDatasetsIsobaricNormalization:
                     return split_name
             return None
 
-        assert find_split("PEPTIDE") == find_split("PEPTLDE"), (
-            "I/L variants must land in the same split"
-        )
+        assert find_split("PEPTIDE") == find_split(
+            "PEPTLDE"
+        ), "I/L variants must land in the same split"
 
     def test_il_variants_counted_as_one_peptide(self, tmp_path):
         """I/L variants count as a single peptide due to isobaric normalization."""
@@ -757,9 +757,9 @@ class TestCreateDatasetsIsobaricNormalization:
                         return name
                 return None
 
-            assert find_split(i_seq) == find_split(l_seq), (
-                f"I/L pair PEP{i}I / PEP{i}L must be in the same split"
-            )
+            assert find_split(i_seq) == find_split(
+                l_seq
+            ), f"I/L pair PEP{i}I / PEP{i}L must be in the same split"
 
     def test_isobaric_normalization_is_unconditional(self, tmp_path):
         """Isobaric normalization is always applied; there is no opt-out."""
@@ -811,7 +811,8 @@ class TestCreateDatasetsIsobaricNormalization:
         # Existing train split contains PEPTLDE (L-form).
         train_path = _write_mgf(
             tmp_path / "exist_train.mgf",
-            [("PEPTLDE", [100.0], [1.0])] + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
+            [("PEPTLDE", [100.0], [1.0])]
+            + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
         )
         val_path = _write_mgf(
             tmp_path / "exist_val.mgf",
@@ -826,7 +827,8 @@ class TestCreateDatasetsIsobaricNormalization:
         # New data has PEPTIDE (I-form), the I/L variant of PEPTLDE.
         mgf = _write_mgf(
             tmp_path / "new.mgf",
-            [("PEPTIDE", [100.0], [1.0])] + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
+            [("PEPTIDE", [100.0], [1.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
         )
         output_root = str(tmp_path / "out")
 
@@ -869,9 +871,9 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPTIDE") == find_split("PEPTLDE"), (
-            "Default behavior must place I/L variants in the same split"
-        )
+        assert find_split("PEPTIDE") == find_split(
+            "PEPTLDE"
+        ), "Default behavior must place I/L variants in the same split"
 
     def test_deamidated_n_and_d_land_in_same_split(self, tmp_path):
         """N[Deamidated] and D variants of the same peptide land in the same split."""
@@ -896,9 +898,9 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPTN[Deamidated]DE") == find_split("PEPTDDE"), (
-            "N[Deamidated] and D variants must land in the same split"
-        )
+        assert find_split("PEPTN[Deamidated]DE") == find_split(
+            "PEPTDDE"
+        ), "N[Deamidated] and D variants must land in the same split"
 
     def test_deamidated_q_and_e_land_in_same_split(self, tmp_path):
         """Q[Deamidated] and E variants of the same peptide land in the same split."""
@@ -923,9 +925,9 @@ class TestCreateDatasetsIsobaricNormalization:
                     return name
             return None
 
-        assert find_split("PEPTQ[Deamidated]DE") == find_split("PEPTEDE"), (
-            "Q[Deamidated] and E variants must land in the same split"
-        )
+        assert find_split("PEPTQ[Deamidated]DE") == find_split(
+            "PEPTEDE"
+        ), "Q[Deamidated] and E variants must land in the same split"
 
     def test_all_three_normalizations_together(self, tmp_path):
         """A peptide with I, N[Deamidated], and Q[Deamidated] is grouped with
@@ -975,16 +977,17 @@ class TestCreateDatasetsIsobaricNormalization:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_seqs = set(_get_peptides(train + val + test))
-        assert "PEPTN[Deamidated]DE" in all_seqs, (
-            "Original N[Deamidated] sequence must be preserved in output"
-        )
+        assert (
+            "PEPTN[Deamidated]DE" in all_seqs
+        ), "Original N[Deamidated] sequence must be preserved in output"
         assert "PEPTDDE" in all_seqs
 
     def test_deamidation_with_existing_splits(self, tmp_path):
         """N[Deamidated]-form in new data routes to the split containing the D-form."""
         train_path = _write_mgf(
             tmp_path / "exist_train.mgf",
-            [("PEPTDDE", [100.0], [1.0])] + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
+            [("PEPTDDE", [100.0], [1.0])]
+            + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
         )
         val_path = _write_mgf(
             tmp_path / "exist_val.mgf",
@@ -1017,8 +1020,8 @@ class TestCreateDatasetsIsobaricNormalization:
         val_seqs = set(_get_peptides(val))
         test_seqs = set(_get_peptides(test))
 
-        assert "PEPTN[Deamidated]DE" in train_seqs, (
-            "N[Deamidated]-form should follow D-form into train"
-        )
+        assert (
+            "PEPTN[Deamidated]DE" in train_seqs
+        ), "N[Deamidated]-form should follow D-form into train"
         assert "PEPTN[Deamidated]DE" not in val_seqs
         assert "PEPTN[Deamidated]DE" not in test_seqs
