@@ -45,6 +45,34 @@ def _get_peptides(spectra):
     return [s["params"]["seq"] for s in spectra]
 
 
+def _write_mgf_with_charges(path, spectra):
+    """Write spectra including charge fields.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Output file path.
+    spectra : list[tuple[str, int, list[float], list[float]]]
+        Each element is (peptide_sequence, charge, mz_values, intensity_values).
+
+    Returns
+    -------
+    str
+        The string path to the written file.
+    """
+    records = []
+    for seq, charge, mz, intensity in spectra:
+        records.append(
+            {
+                "params": {"seq": seq, "pepmass": (100.0,), "charge": [charge]},
+                "m/z array": np.array(mz),
+                "intensity array": np.array(intensity),
+            }
+        )
+    pyteomics.mgf.write(records, output=str(path))
+    return str(path)
+
+
 class TestCreateDatasetsBasic:
     """Basic functionality tests for create_datasets."""
 
@@ -146,10 +174,10 @@ class TestCreateDatasetsMultipleFiles:
         assert any(p.startswith("PEPB") for p in all_peps)
 
 
-class TestCreateDatasetsSpectraPerPeptide:
-    """Tests for the spectra_per_peptide option."""
+class TestCreateDatasetsSpectraPerPrecursor:
+    """Tests for the spectra_per_precursor option."""
 
-    def test_limits_spectra_per_peptide(self, tmp_path):
+    def test_limits_spectra_per_precursor(self, tmp_path):
         """Each peptide should have at most k spectra in the output."""
         spectra = []
         for i in range(10):
@@ -161,7 +189,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         create_datasets(
             mgf,
             output_root=output_root,
-            spectra_per_peptide=2,
+            spectra_per_precursor=2,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -178,7 +206,7 @@ class TestCreateDatasetsSpectraPerPeptide:
             assert count <= 2, f"{pep} has {count} spectra, expected <= 2"
 
     def test_no_limit_keeps_all_spectra(self, tmp_path):
-        """Without spectra_per_peptide, all spectra are retained."""
+        """Without spectra_per_precursor, all spectra are retained."""
         spectra = []
         for i in range(10):
             for _ in range(5):
@@ -194,7 +222,7 @@ class TestCreateDatasetsSpectraPerPeptide:
 
         assert len(train) + len(val) + len(test) == 50
 
-    def test_spectra_per_peptide_with_fewer_available(self, tmp_path):
+    def test_spectra_per_precursor_with_fewer_available(self, tmp_path):
         """Peptides with fewer than k spectra keep all of them."""
         spectra = [
             ("PEPA", [100.0], [1.0]),
@@ -211,7 +239,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         create_datasets(
             mgf,
             output_root=output_root,
-            spectra_per_peptide=5,
+            spectra_per_precursor=5,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -226,6 +254,33 @@ class TestCreateDatasetsSpectraPerPeptide:
 
         assert pep_counts.get("PEPA", 0) == 1
         assert pep_counts.get("PEPB", 0) == 3
+
+    def test_spectra_per_precursor_per_charge_state(self, tmp_path):
+        """spectra_per_precursor=1 keeps one spectrum per (peptide, charge) pair."""
+        # PEPA appears 3 times with charge 2 and 3 times with charge 3.
+        # With spectra_per_precursor=1, we expect 1 spectrum at charge 2 AND
+        # 1 spectrum at charge 3 — 2 spectra total for PEPA, not 1.
+        spectra = []
+        for _ in range(3):
+            spectra.append(("PEPA", 2, [100.0], [1.0]))
+        for _ in range(3):
+            spectra.append(("PEPA", 3, [100.0], [1.0]))
+        # Add enough other peptides to form valid splits.
+        for i in range(18):
+            spectra.append((f"OTHER{i}", 2, [100.0], [1.0]))
+        mgf = _write_mgf_with_charges(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=1)
+
+        all_spectra = []
+        for split in ("train", "val", "test"):
+            all_spectra.extend(_read_mgf(tmp_path / f"out.{split}.mgf"))
+
+        pepa_spectra = [s for s in all_spectra if s["params"]["seq"] == "PEPA"]
+        # One spectrum per charge state → 2 total.
+        assert len(pepa_spectra) == 2
+        charges = {tuple(s["params"].get("charge", [])) for s in pepa_spectra}
+        assert charges == {(2,), (3,)}
 
 
 class TestCreateDatasetsReproducibility:
@@ -329,26 +384,30 @@ class TestCreateDatasetsEdgeCases:
                 existing_splits=(split, split),
             )
 
-    def test_spectra_per_peptide_zero_raises_error(self, tmp_path):
-        """Passing spectra_per_peptide=0 should raise a ValueError."""
+    def test_spectra_per_precursor_zero_raises_error(self, tmp_path):
+        """Passing spectra_per_precursor=0 should raise a ValueError."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [("PEP0", [100.0], [1.0])],
         )
-        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+        with pytest.raises(
+            ValueError, match="spectra_per_precursor must be a positive"
+        ):
             create_datasets(
-                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=0
+                mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=0
             )
 
-    def test_spectra_per_peptide_negative_raises_error(self, tmp_path):
-        """Passing a negative spectra_per_peptide should raise a ValueError."""
+    def test_spectra_per_precursor_negative_raises_error(self, tmp_path):
+        """Passing a negative spectra_per_precursor should raise a ValueError."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [("PEP0", [100.0], [1.0])],
         )
-        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+        with pytest.raises(
+            ValueError, match="spectra_per_precursor must be a positive"
+        ):
             create_datasets(
-                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=-1
+                mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=-1
             )
 
     def test_small_dataset_all_go_to_train(self, tmp_path):

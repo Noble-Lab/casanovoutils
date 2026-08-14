@@ -60,9 +60,33 @@ def _canonical(seq: str) -> str:
     return seq
 
 
+def _sampling_key(spectrum: dict) -> tuple[str, tuple]:
+    """Return the key used for spectra_per_precursor counting.
+
+    The key is ``(canonical_seq, charge_tuple)`` so that spectra with the
+    same peptide sequence but different precursor charge states are counted
+    independently.  This allows each charge state to contribute up to
+    ``spectra_per_precursor`` spectra.
+
+    Parameters
+    ----------
+    spectrum : dict
+        A spectrum dict as returned by pyteomics.
+
+    Returns
+    -------
+    tuple[str, tuple]
+        ``(_canonical(seq), tuple(charge))`` where *charge* is the list of
+        charge values from the spectrum params (may be empty).
+    """
+    seq = spectrum["params"]["seq"]
+    charge = tuple(spectrum["params"].get("charge", []))
+    return (_canonical(seq), charge)
+
+
 def _collect_peptide_counts(
     mgf_files: tuple[PathLike, ...],
-) -> tuple[dict[str, int], int]:
+) -> tuple[dict[str, int], dict[tuple, int], int]:
     """Pass 1: stream all input MGF files and count spectra per peptide.
 
     Parameters
@@ -73,11 +97,16 @@ def _collect_peptide_counts(
     Returns
     -------
     pep_counts : dict[str, int]
-        Mapping of canonical peptide sequence to spectrum count.
+        Mapping of canonical peptide sequence to spectrum count.  Used for
+        split assignment (peptide-level).
+    sampling_counts : dict[tuple, int]
+        Mapping of ``(canonical_seq, charge_tuple)`` to spectrum count.
+        Used for per-charge-state ``spectra_per_precursor`` capping.
     total_spectra : int
         Total number of spectra read across all files.
     """
     pep_counts: dict[str, int] = {}
+    sampling_counts: dict[tuple, int] = {}
     total_spectra = 0
     for mgf_file in mgf_files:
         file_count = 0
@@ -96,23 +125,26 @@ def _collect_peptide_counts(
                     f"Missing 'seq' in spectrum params for spectrum "
                     f"{spectrum_index} in file {mgf_file}"
                 ) from exc
-            key = _canonical(seq)
-            pep_counts[key] = pep_counts.get(key, 0) + 1
+            pep_key = _canonical(seq)
+            pep_counts[pep_key] = pep_counts.get(pep_key, 0) + 1
+            samp_key = _sampling_key(spectrum)
+            sampling_counts[samp_key] = sampling_counts.get(samp_key, 0) + 1
             file_count += 1
         logging.info(f"Read {file_count} spectra from {mgf_file}.")
         total_spectra += file_count
 
     logging.info(f"Total spectra read: {total_spectra}")
     logging.info(f"Unique peptides: {len(pep_counts)}")
-    return pep_counts, total_spectra
+    return pep_counts, sampling_counts, total_spectra
 
 
 def _assign_splits(
     pep_counts: dict[str, int],
+    sampling_counts: dict[tuple, int],
     total_spectra: int,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
-    spectra_per_peptide: Optional[int],
-) -> tuple[dict[str, str], dict[str, set[int]], dict[str, set[str]]]:
+    spectra_per_precursor: Optional[int],
+) -> tuple[dict[str, str], dict[tuple, set[int]], dict[str, set[str]]]:
     """Compute per-peptide split assignments and sampling indices.
 
     Uses the global random state (caller must seed before calling).
@@ -121,42 +153,47 @@ def _assign_splits(
     ----------
     pep_counts : dict[str, int]
         Mapping of canonical peptide sequence to spectrum count from pass 1.
+        Used for split-proportion calculations (peptide-level).
+    sampling_counts : dict[tuple, int]
+        Mapping of ``(canonical_seq, charge_tuple)`` to spectrum count from
+        pass 1.  Used to cap spectra per (peptide, charge) combination.
     total_spectra : int
         Total spectra across all input files.
     existing_splits : tuple of PathLike or None
         Paths to existing train/val/test MGF files, or None.
-    spectra_per_peptide : int or None
-        Maximum spectra to retain per peptide, or None.
+    spectra_per_precursor : int or None
+        Maximum spectra to retain per (peptide, charge state), or None.
 
     Returns
     -------
     pep_to_split : dict[str, str]
         Mapping of canonical peptide sequence to split name
         ("train", "val", "test").
-    sampled_indices : dict[str, set[int]]
-        For peptides that exceed spectra_per_peptide, the 0-based indices
-        of spectra to retain. Empty dict if spectra_per_peptide is None.
+    sampled_indices : dict[tuple, set[int]]
+        For (peptide, charge) combinations that exceed spectra_per_precursor,
+        the 0-based indices of spectra to retain.  Empty dict if
+        spectra_per_precursor is None.
     existing_peps : dict[str, set[str]]
         Canonical peptides already present in each existing split. Empty sets
         if existing_splits is None.
     """
-    # Pre-compute which spectrum indices to keep for each peptide when
-    # spectra_per_peptide is set.
-    sampled_indices: dict[str, set[int]] = {}
-    if spectra_per_peptide is not None:
+    # Pre-compute which spectrum indices to keep for each (peptide, charge)
+    # when spectra_per_precursor is set.
+    sampled_indices: dict[tuple, set[int]] = {}
+    if spectra_per_precursor is not None:
         spectra_after = 0
-        for pep, count in pep_counts.items():
-            if count > spectra_per_peptide:
-                sampled_indices[pep] = set(
-                    random.sample(range(count), spectra_per_peptide)
+        for samp_key, count in sampling_counts.items():
+            if count > spectra_per_precursor:
+                sampled_indices[samp_key] = set(
+                    random.sample(range(count), spectra_per_precursor)
                 )
-                spectra_after += spectra_per_peptide
+                spectra_after += spectra_per_precursor
             else:
                 spectra_after += count
         eliminated = total_spectra - spectra_after
         logging.info(
-            f"Spectra eliminated by spectra_per_peptide="
-            f"{spectra_per_peptide}: {eliminated}"
+            f"Spectra eliminated by spectra_per_precursor="
+            f"{spectra_per_precursor}: {eliminated}"
         )
 
     # Handle existing splits if provided.
@@ -337,8 +374,8 @@ def _write_splits(
     mgf_files: tuple[PathLike, ...],
     output_root: str,
     pep_to_split: dict[str, str],
-    sampled_indices: dict[str, set[int]],
-    spectra_per_peptide: Optional[int],
+    sampled_indices: dict[tuple, set[int]],
+    spectra_per_precursor: Optional[int],
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     combine_with_existing: bool,
 ) -> tuple[dict[str, int], dict[str, set[str]]]:
@@ -352,10 +389,10 @@ def _write_splits(
         Root path for output files.
     pep_to_split : dict[str, str]
         Mapping from canonical peptide sequence to split name.
-    sampled_indices : dict[str, set[int]]
-        Per-peptide sets of 0-based spectrum indices to retain.
-    spectra_per_peptide : int or None
-        Maximum spectra per peptide (used to check sampled_indices).
+    sampled_indices : dict[tuple, set[int]]
+        Per-(peptide, charge) sets of 0-based spectrum indices to retain.
+    spectra_per_precursor : int or None
+        Maximum spectra per (peptide, charge) (used to check sampled_indices).
     existing_splits : tuple of PathLike or None
         Paths to existing split files, required when combine_with_existing.
     combine_with_existing : bool
@@ -429,7 +466,7 @@ def _write_splits(
                     write_spectrum(split_name, spectrum)
 
         # Stream new input MGFs.
-        pep_counters: dict[str, int] = {}
+        pep_counters: dict[tuple, int] = {}
         for mgf_file in mgf_files:
             for spectrum in tqdm.tqdm(
                 pyteomics.mgf.read(str(mgf_file), use_index=False),
@@ -437,19 +474,20 @@ def _write_splits(
                 unit="PSM",
             ):
                 seq = spectrum["params"]["seq"]
-                key = _canonical(seq)
+                pep_key = _canonical(seq)
+                samp_key = _sampling_key(spectrum)
 
-                # Apply spectra_per_peptide filtering.
-                if spectra_per_peptide is not None:
-                    idx = pep_counters.get(key, 0)
-                    pep_counters[key] = idx + 1
-                    if key in sampled_indices:
-                        if idx not in sampled_indices[key]:
+                # Apply spectra_per_precursor filtering per (peptide, charge).
+                if spectra_per_precursor is not None:
+                    idx = pep_counters.get(samp_key, 0)
+                    pep_counters[samp_key] = idx + 1
+                    if samp_key in sampled_indices:
+                        if idx not in sampled_indices[samp_key]:
                             continue
-                    # If key not in sampled_indices, count <= limit,
+                    # If samp_key not in sampled_indices, count <= limit,
                     # so keep all.
 
-                split_name = pep_to_split.get(key)
+                split_name = pep_to_split.get(pep_key)
                 if split_name is not None:
                     write_spectrum(split_name, spectrum)
 
@@ -463,7 +501,7 @@ def _write_splits(
 def create_datasets(
     *mgf_files: PathLike,
     output_root: str,
-    spectra_per_peptide: Optional[int] = None,
+    spectra_per_precursor: Optional[int] = None,
     random_seed: int = 42,
     overwrite: bool = False,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]] = None,
@@ -501,10 +539,13 @@ def create_datasets(
         ``<output_root>.train.mgf``, ``<output_root>.val.mgf``, and
         ``<output_root>.test.mgf``. A log file ``<output_root>.log`` will
         also be created.
-    spectra_per_peptide : int, optional
+    spectra_per_precursor : int, optional
         If provided, randomly select at most this many spectra for each
-        peptide from the new input files. When ``combine_with_existing``
-        is True, existing spectra are not subject to this cap. By default
+        (peptide, precursor charge state) combination from the new input
+        files.  Spectra with the same sequence but different charge states
+        are treated independently, so each charge state may contribute up
+        to ``spectra_per_precursor`` spectra.  When ``combine_with_existing``
+        is True, existing spectra are not subject to this cap.  By default
         all spectra are retained.
     random_seed : int, default=42
         Random seed for reproducible splitting and sampling.
@@ -522,10 +563,10 @@ def create_datasets(
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
 
-    if spectra_per_peptide is not None and spectra_per_peptide <= 0:
+    if spectra_per_precursor is not None and spectra_per_precursor <= 0:
         raise ValueError(
-            f"spectra_per_peptide must be a positive integer, "
-            f"got {spectra_per_peptide}."
+            f"spectra_per_precursor must be a positive integer, "
+            f"got {spectra_per_precursor}."
         )
 
     if combine_with_existing and existing_splits is None:
@@ -551,13 +592,14 @@ def create_datasets(
 
     random.seed(random_seed)
 
-    pep_counts, total_spectra = _collect_peptide_counts(mgf_files)
+    pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(mgf_files)
 
     pep_to_split, sampled_indices, existing_peps = _assign_splits(
         pep_counts,
+        sampling_counts,
         total_spectra,
         existing_splits,
-        spectra_per_peptide,
+        spectra_per_precursor,
     )
 
     split_spectra_counts, split_pep_sets = _write_splits(
@@ -565,7 +607,7 @@ def create_datasets(
         output_root,
         pep_to_split,
         sampled_indices,
-        spectra_per_peptide,
+        spectra_per_precursor,
         existing_splits,
         combine_with_existing,
     )
