@@ -3,6 +3,8 @@
 import logging
 import pathlib
 import random
+import re
+import tempfile
 from os import PathLike
 from typing import Optional
 
@@ -11,10 +13,15 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
+from .mskb2proforma import convert as _mskb2proforma_convert
 from .types import Commands
 
 # Number of spectra to buffer per output file before flushing to disk.
 _WRITE_BUFFER_SIZE = 1000
+
+# Matches a bracket-enclosed modification token and an optional trailing dash
+# (for N-terminal mods like "[Acetyl]-").
+_MOD_RE = re.compile(r"\[[^\]]*\]-?")
 
 
 def _canonical(seq: str) -> str:
@@ -42,22 +49,71 @@ def _canonical(seq: str) -> str:
     str
         Canonical peptide sequence.
     """
-    # Replace I with L only at residue positions (bracket depth 0), so that
-    # uppercase I characters inside modification names are left untouched.
-    chars = []
-    depth = 0
-    for ch in seq:
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-        elif ch == "I" and depth == 0:
-            ch = "L"
-        chars.append(ch)
-    seq = "".join(chars)
+    seq = seq.replace("I", "L")
     seq = seq.replace("N[Deamidated]", "D")
     seq = seq.replace("Q[Deamidated]", "E")
     return seq
+
+
+def _strip_mods(seq: str) -> str:
+    """Remove all modification tokens from a ProForma peptide sequence.
+
+    Strips bracket-enclosed modification names and masses, including
+    N-terminal modification tokens (e.g. ``[Acetyl]-``).
+
+    Parameters
+    ----------
+    seq : str
+        ProForma peptide sequence, e.g. ``"[Acetyl]-AC[Carbamidomethyl]GK"``.
+
+    Returns
+    -------
+    str
+        Bare amino-acid sequence, e.g. ``"ACGK"``.
+    """
+    return _MOD_RE.sub("", seq)
+
+
+def _write_peptides_txt(output_root: str) -> None:
+    """Write ``<split>.peptides.txt`` files for each split.
+
+    Reads each output MGF and collects every unique SEQ value.  Each output
+    line contains two tab-separated columns: the modified sequence (ProForma,
+    as it appears in the MGF) and the canonical bare sequence.  The canonical
+    bare sequence is produced by applying the same isobaric substitutions used
+    for splitting (I→L, N[Deamidated]→D, Q[Deamidated]→E) and then stripping
+    all remaining modification tokens, so mass-equivalent variants share a
+    single bare sequence.  Lines are sorted alphabetically by the canonical
+    bare sequence, then by the modified sequence.
+
+    Also logs, per split, the number of unique modified sequences and the
+    number of unique bare sequences.
+
+    Parameters
+    ----------
+    output_root : str
+        Root path used to locate output MGF files and write peptides files.
+    """
+    for split in ("train", "val", "test"):
+        mgf_path = pathlib.Path(f"{output_root}.{split}.mgf")
+        pep_path = pathlib.Path(f"{output_root}.{split}.peptides.txt")
+        # Map modified seq -> bare seq (many-to-one).
+        mod_to_bare: dict[str, str] = {}
+        with pyteomics.mgf.read(str(mgf_path), use_index=False) as reader:
+            for spectrum in reader:
+                seq = spectrum["params"].get("seq")
+                if seq and seq not in mod_to_bare:
+                    mod_to_bare[seq] = _strip_mods(_canonical(seq))
+        pairs = sorted(mod_to_bare.items(), key=lambda kv: (kv[1], kv[0]))
+        with open(pep_path, "w") as fh:
+            for modified, bare in pairs:
+                fh.write(f"{modified}\t{bare}\n")
+        n_modified = len(mod_to_bare)
+        n_bare = len(set(mod_to_bare.values()))
+        logging.info(
+            f"{split} peptides.txt: {n_modified} unique modified sequences, "
+            f"{n_bare} unique bare sequences"
+        )
 
 
 def _sampling_key(spectrum: dict) -> tuple[str, tuple]:
@@ -506,6 +562,7 @@ def create_datasets(
     overwrite: bool = False,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]] = None,
     combine_with_existing: bool = False,
+    mskb_format: bool = False,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
@@ -537,8 +594,14 @@ def create_datasets(
     output_root : str
         Root path for the output files. Three MGF files will be created:
         ``<output_root>.train.mgf``, ``<output_root>.val.mgf``, and
-        ``<output_root>.test.mgf``. A log file ``<output_root>.log`` will
-        also be created.
+        ``<output_root>.test.mgf``. A two-column tab-separated peptides
+        file is written for each split:
+        ``<output_root>.[train,val,test].peptides.txt``. Column 1 is the
+        modified sequence (ProForma) and column 2 is the canonical bare
+        sequence (isobaric substitutions applied, then modification tokens
+        stripped); rows are sorted by canonical bare sequence then by
+        modified sequence. A log file ``<output_root>.log.txt``
+        is also created.
     spectra_per_precursor : int, optional
         If provided, randomly select at most this many spectra for each
         (peptide, precursor charge state) combination from the new input
@@ -559,6 +622,10 @@ def create_datasets(
     combine_with_existing : bool, default=False
         If True, output MGF files include both existing and new spectra.
         If False, only new spectra are written.
+    mskb_format : bool, default=False
+        If True, input MGF files are assumed to use MassIVE-KB PTM notation
+        and are converted to ProForma format before splitting. The output MGF
+        files always contain ProForma sequences.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
@@ -576,10 +643,11 @@ def create_datasets(
 
     if not overwrite:
         expected_files = [
-            pathlib.Path(f"{output_root}.{split}.mgf")
+            pathlib.Path(f"{output_root}.{split}.{ext}")
             for split in ("train", "val", "test")
+            for ext in ("mgf", "peptides.txt")
         ]
-        expected_files.append(pathlib.Path(f"{output_root}.log"))
+        expected_files.append(pathlib.Path(f"{output_root}.log.txt"))
         existing = [f for f in expected_files if f.exists()]
         if existing:
             file_list = ", ".join(str(f) for f in existing)
@@ -588,29 +656,41 @@ def create_datasets(
                 f"Use --overwrite to overwrite."
             )
 
-    configure_logging(pathlib.Path(f"{output_root}.log"))
+    configure_logging(pathlib.Path(f"{output_root}.log.txt"))
 
     random.seed(random_seed)
 
-    pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(mgf_files)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if mskb_format:
+            tmp = pathlib.Path(tmpdir)
+            converted = []
+            for i, src in enumerate(mgf_files):
+                src = pathlib.Path(src)
+                dst = tmp / f"converted_{i}_{src.name}"
+                logging.info(f"Converting {src} from MassIVE-KB format to ProForma...")
+                _mskb2proforma_convert(src, dst)
+                converted.append(dst)
+            mgf_files = tuple(converted)
 
-    pep_to_split, sampled_indices, existing_peps = _assign_splits(
-        pep_counts,
-        sampling_counts,
-        total_spectra,
-        existing_splits,
-        spectra_per_precursor,
-    )
+        pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(mgf_files)
 
-    split_spectra_counts, split_pep_sets = _write_splits(
-        mgf_files,
-        output_root,
-        pep_to_split,
-        sampled_indices,
-        spectra_per_precursor,
-        existing_splits,
-        combine_with_existing,
-    )
+        pep_to_split, sampled_indices, existing_peps = _assign_splits(
+            pep_counts,
+            sampling_counts,
+            total_spectra,
+            existing_splits,
+            spectra_per_precursor,
+        )
+
+        split_spectra_counts, split_pep_sets = _write_splits(
+            mgf_files,
+            output_root,
+            pep_to_split,
+            sampled_indices,
+            spectra_per_precursor,
+            existing_splits,
+            combine_with_existing,
+        )
 
     # Log split summaries.
     for split_name in ("train", "val", "test"):
@@ -626,6 +706,8 @@ def create_datasets(
             )
         else:
             logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
+
+    _write_peptides_txt(output_root)
 
 
 COMMANDS: Commands = create_datasets
