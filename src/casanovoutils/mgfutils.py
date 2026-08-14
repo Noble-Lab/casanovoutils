@@ -1,10 +1,12 @@
 """
 Utilities for reading, writing, and processing MGF spectrum files.
 
-Provides functions to iterate over spectra from MGF files or in-memory
-dicts, shuffle, and purge near-duplicate peaks.
-A ``pipeline`` function chains these stages, and a ``main`` entry point
-exposes them all as CLI subcommands via ``fire``.
+Provides functions to iterate over spectra from MGF files or in-memory dicts,
+shuffle, cap spectra per peptide or precursor (spectra-per-peptide), downsample
+to a target count or proportion (downsample-spectra), and purge near-duplicate
+peaks. A ``pipeline`` function chains shuffle, spectra-per-peptide, and purge
+into a single pass, and a ``main`` entry point exposes them all as CLI
+subcommands via ``fire``.
 """
 
 import itertools
