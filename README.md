@@ -25,7 +25,11 @@ match (PSM) data**, designed to work cleanly with
 pip install casanovoutils
 ```
 
-Requires Python 3.13 or later.
+Requires Python 3.10 or later.
+
+> **Intel Mac (x86\_64) users:** PyTorch dropped Intel Mac support in v2.5.0, and
+> Python 3.13 wheels for PyTorch were only introduced in v2.5.0. This means
+> Python 3.13 is **not** installable on Intel Macs. Use Python 3.12 instead.
 
 ## Quick start
 
