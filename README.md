@@ -85,9 +85,8 @@ All commands live under the single `casanovoutils` entry point:
 ```text
 casanovoutils
 ├── mgfutils            MGF file processing
-│   ├── pipeline        shuffle → downsample → purge-redundant in one pass
+│   ├── pipeline        shuffle → spectra-per-peptide → purge-redundant in one pass
 │   ├── shuffle         randomise spectrum order
-│   ├── downsample      limit spectra per peptide sequence
 │   ├── spectra-per-peptide  reservoir-sample k spectra per peptide
 │   ├── downsample-spectra   downsample to a target count or proportion
 │   └── purge-redundant remove near-duplicate peaks by m/z
