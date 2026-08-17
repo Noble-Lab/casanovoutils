@@ -150,7 +150,13 @@ def _sampling_key(spectrum: dict) -> tuple[str, tuple]:
         charge values from the spectrum params (may be empty).
     """
     seq = spectrum["params"]["seq"]
-    charge = tuple(spectrum["params"].get("charge", []))
+    charge_raw = spectrum["params"].get("charge", [])
+    if isinstance(charge_raw, (list, tuple)):
+        charge = tuple(charge_raw)
+    elif charge_raw is None:
+        charge = ()
+    else:
+        charge = (charge_raw,)
     return (_canonical(seq), charge)
 
 
@@ -558,7 +564,7 @@ def _write_splits(
                         write_spectrum(split_name, spectrum)
 
         # Stream new input MGFs.
-        pep_counters: dict[tuple, int] = {}
+        precursor_counters: dict[tuple, int] = {}
         for mgf_file in mgf_files:
             with pyteomics.mgf.read(str(mgf_file), use_index=False) as reader:
                 for spectrum in tqdm.tqdm(
@@ -572,8 +578,8 @@ def _write_splits(
 
                     # Apply spectra_per_precursor filtering per (peptide, charge).
                     if spectra_per_precursor is not None:
-                        idx = pep_counters.get(samp_key, 0)
-                        pep_counters[samp_key] = idx + 1
+                        idx = precursor_counters.get(samp_key, 0)
+                        precursor_counters[samp_key] = idx + 1
                         if samp_key in sampled_indices:
                             if idx not in sampled_indices[samp_key]:
                                 continue

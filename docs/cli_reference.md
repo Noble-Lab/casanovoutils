@@ -424,7 +424,7 @@ splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
 | --- | --- | --- | --- |
 | `*mgf_files` | path(s) | required | One or more annotated MGF files |
 | `--output_root` | str | required | Base path for output files |
-| `--spectra_per_peptide` | int | `None` | Cap spectra per peptide from new input files |
+| `--spectra_per_precursor` | int | `None` | Cap spectra per (peptide, charge state) precursor from new input files |
 | `--random_seed` | int | `42` | Random seed for reproducibility |
 | `--overwrite` | bool | `False` | Overwrite existing output files |
 | `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
@@ -436,9 +436,9 @@ splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
 # Basic split
 casanovoutils datasets input.mgf --output_root splits/run1
 
-# Multiple input files, cap at 3 spectra per peptide
+# Multiple input files, cap at 3 spectra per precursor
 casanovoutils datasets a.mgf b.mgf --output_root splits/combined \
-  --spectra_per_peptide 3
+  --spectra_per_precursor 3
 ```
 
 ---

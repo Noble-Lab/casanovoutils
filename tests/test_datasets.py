@@ -178,7 +178,7 @@ class TestCreateDatasetsSpectraPerPrecursor:
     """Tests for the spectra_per_precursor option."""
 
     def test_limits_spectra_per_precursor(self, tmp_path):
-        """Each peptide should have at most k spectra in the output."""
+        """Each (peptide, charge state) precursor should have at most k spectra in the output."""
         spectra = []
         for i in range(10):
             for _ in range(5):
