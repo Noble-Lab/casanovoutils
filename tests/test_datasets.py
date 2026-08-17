@@ -889,7 +889,7 @@ class TestCreateDatasetsIsobaricNormalization:
         # Original sequences must appear in the output.
         assert "PEPTIDE" in all_seqs
         assert "REPTLDE" in all_seqs
-        # The canonical form should NOT appear in the output.
+        # Isobaric I/L variants of each input sequence must NOT appear in the output.
         assert "PEPTLDE" not in all_seqs
         assert "REPTIDE" not in all_seqs
 
@@ -1129,7 +1129,7 @@ class TestCreateDatasetsIsobaricNormalization:
 
 
 class TestCreateDatasetsEnhancements:
-    """Tests for peptides.txt output, log.txt output, and --mskb-format."""
+    """Tests for peptides.txt output, log.txt output, and --mskb_format."""
 
     # ------------------------------------------------------------------
     # _strip_mods unit tests

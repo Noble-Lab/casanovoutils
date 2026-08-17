@@ -165,8 +165,10 @@ def convert(
                 params["seq"] = _convert_seq(original)
                 n_converted += 1
             except Exception as exc:
+                title = params.get("title", "<no title>")
                 raise ValueError(
-                    f"Could not convert sequence {original!r} in {input_file} "
+                    f"Could not convert sequence {original!r} "
+                    f"(spectrum title: {title!r}) in {input_file} "
                     f"to ProForma: {exc}"
                 ) from exc
         return {**spectrum, "params": params}
