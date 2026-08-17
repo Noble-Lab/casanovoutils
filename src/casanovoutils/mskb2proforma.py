@@ -155,10 +155,9 @@ def convert(
     logging.info("Converting %s -> %s", input_file, output_file)
 
     n_converted = 0
-    n_skipped = 0
 
     def _convert_spectrum(spectrum: dict) -> dict:
-        nonlocal n_converted, n_skipped
+        nonlocal n_converted
         params = dict(spectrum["params"])
         if "seq" in params:
             original = params["seq"]
@@ -166,12 +165,9 @@ def convert(
                 params["seq"] = _convert_seq(original)
                 n_converted += 1
             except Exception as exc:
-                logging.warning(
-                    "Could not convert sequence %r: %s — keeping original",
-                    original,
-                    exc,
-                )
-                n_skipped += 1
+                raise ValueError(
+                    f"Could not convert sequence {original!r} to ProForma: {exc}"
+                ) from exc
         return {**spectrum, "params": params}
 
     with pyteomics.mgf.read(
@@ -186,11 +182,6 @@ def convert(
         )
 
     logging.info("Converted %d spectra", n_converted)
-    if n_skipped:
-        logging.warning(
-            "Skipped conversion for %d spectra (original SEQ retained)",
-            n_skipped,
-        )
 
 
 COMMANDS: Commands = convert
