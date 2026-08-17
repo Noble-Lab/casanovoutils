@@ -663,8 +663,10 @@ def create_datasets(
         If False, only new spectra are written.
     mskb_format : bool, default=False
         If True, input MGF files are assumed to use MassIVE-KB PTM notation
-        and are converted to ProForma format before splitting. Conversion
-        raises a ``ValueError`` if any sequence cannot be converted.
+        and are converted to ProForma format before splitting. The output MGF
+        files will contain the converted ProForma sequences, not the original
+        MassIVE-KB strings. Conversion raises a ``ValueError`` if any
+        sequence cannot be converted.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
