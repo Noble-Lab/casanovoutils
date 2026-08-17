@@ -296,6 +296,13 @@ def _assign_splits(
                             f"existing split '{split_name}' from file "
                             f"'{split_path}'"
                         ) from exc
+                    if _MSKB_SEQ_RE.search(seq):
+                        raise ValueError(
+                            f"Existing split '{split_name}' ({split_path}) "
+                            f"appears to use MassIVE-KB PTM notation "
+                            f"(e.g. sequence {seq!r}). "
+                            f"existing_splits must be in ProForma format."
+                        )
                     existing_peps[split_name].add(_canonical(seq))
             logging.info(
                 f"Existing {split_name}: "
@@ -672,21 +679,6 @@ def create_datasets(
         raise ValueError(
             "combine_with_existing=True requires existing_splits to be provided."
         )
-
-    if existing_splits is not None:
-        split_names = ("train", "val", "test")
-        for split_name, split_path in zip(split_names, existing_splits):
-            with pyteomics.mgf.read(str(split_path), use_index=False) as reader:
-                for spectrum in reader:
-                    seq = spectrum["params"].get("seq", "")
-                    if seq and _MSKB_SEQ_RE.search(seq):
-                        raise ValueError(
-                            f"Existing split '{split_name}' ({split_path}) "
-                            f"appears to use MassIVE-KB PTM notation "
-                            f"(e.g. sequence {seq!r}). "
-                            f"existing_splits must be in ProForma format."
-                        )
-                    break  # Only check first spectrum per file.
 
     if not overwrite:
         expected_files = [
