@@ -384,6 +384,31 @@ class TestCreateDatasetsEdgeCases:
                 existing_splits=(split, split),
             )
 
+    def test_existing_splits_mskb_notation_raises_error(self, tmp_path):
+        """existing_splits containing MassIVE-KB PTM notation should raise ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        # Write a split MGF with a MassIVE-KB-style sequence (mass shift notation).
+        mskb_split = tmp_path / "mskb_split.mgf"
+        pyteomics.mgf.write(
+            [
+                {
+                    "params": {"seq": "C+57.021PEPTIDE", "pepmass": (900.0,)},
+                    "m/z array": np.array([100.0]),
+                    "intensity array": np.array([1.0]),
+                }
+            ],
+            output=str(mskb_split),
+        )
+        with pytest.raises(ValueError, match="MassIVE-KB"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=(mskb_split, mskb_split, mskb_split),
+            )
+
     def test_spectra_per_precursor_zero_raises_error(self, tmp_path):
         """Passing spectra_per_precursor=0 should raise a ValueError."""
         mgf = _write_mgf(
@@ -848,7 +873,7 @@ class TestCreateDatasetsIsobaricNormalization:
 
     def test_original_sequences_preserved_in_output(self, tmp_path):
         """Output MGF files retain original sequences despite isobaric normalization."""
-        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("REPTLDE", [100.0], [1.0])]
         for i in range(28):
             spectra.append((f"OTHER{i}", [100.0], [1.0]))
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
@@ -861,9 +886,12 @@ class TestCreateDatasetsIsobaricNormalization:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_seqs = set(_get_peptides(train + val + test))
-        # Original sequences (not their canonical forms) must be preserved.
+        # Original sequences must appear in the output.
         assert "PEPTIDE" in all_seqs
-        assert "PEPTLDE" in all_seqs
+        assert "REPTLDE" in all_seqs
+        # The canonical form should NOT appear in the output.
+        assert "PEPTLDE" not in all_seqs
+        assert "REPTIDE" not in all_seqs
 
     def test_il_normalization_with_existing_splits(self, tmp_path):
         """I/L variant in new data routes to the correct existing split."""
@@ -1098,3 +1126,207 @@ class TestCreateDatasetsIsobaricNormalization:
         ), "N[Deamidated]-form should follow D-form into train"
         assert "PEPTN[Deamidated]DE" not in val_seqs
         assert "PEPTN[Deamidated]DE" not in test_seqs
+
+
+class TestCreateDatasetsEnhancements:
+    """Tests for peptides.txt output, log.txt output, and --mskb-format."""
+
+    # ------------------------------------------------------------------
+    # _strip_mods unit tests
+    # ------------------------------------------------------------------
+
+    def test_strip_mods_no_mods(self):
+        """Bare sequences are returned unchanged."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("PEPTIDE") == "PEPTIDE"
+
+    def test_strip_mods_per_residue(self):
+        """Per-residue modification brackets are removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("AC[Carbamidomethyl]GK") == "ACGK"
+        assert _strip_mods("AM[Oxidation]G") == "AMG"
+        assert _strip_mods("AN[Deamidated]G") == "ANG"
+
+    def test_strip_mods_nterm(self):
+        """N-terminal modification token including trailing dash is removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("[Acetyl]-PEPTIDE") == "PEPTIDE"
+        assert _strip_mods("[+229.163]-PEPTIDEK") == "PEPTIDEK"
+
+    def test_strip_mods_combined(self):
+        """Mixed N-terminal and per-residue mods are all removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("[+271.174]-AC[Carbamidomethyl]GK[+229.163]") == "ACGK"
+
+    # ------------------------------------------------------------------
+    # peptides.txt output
+    # ------------------------------------------------------------------
+
+    def test_peptides_txt_files_created(self, tmp_path):
+        """A peptides.txt file is created for each split."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i}", [100.0], [1.0]) for i in range(20)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        for split in ("train", "val", "test"):
+            assert (tmp_path / f"out.{split}.peptides.txt").exists()
+
+    def test_peptides_txt_two_columns(self, tmp_path):
+        """peptides.txt has two tab-separated columns: modified and bare."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [
+                ("AC[Carbamidomethyl]GK", [100.0], [1.0]),
+                ("[Acetyl]-PEPTIDE", [100.0], [1.0]),
+            ]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(18)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                assert len(cols) == 2, f"Expected 2 columns, got {len(cols)}: {line!r}"
+                all_rows.append((cols[0], cols[1]))
+
+        modified_seqs = {r[0] for r in all_rows}
+        bare_seqs = {r[1] for r in all_rows}
+
+        # Modified column preserves the full ProForma sequence.
+        assert "AC[Carbamidomethyl]GK" in modified_seqs
+        assert "[Acetyl]-PEPTIDE" in modified_seqs
+        # Bare column applies canonical substitutions then strips mods.
+        # PEPTIDE contains I → L, so bare form is PEPTLDE.
+        assert "ACGK" in bare_seqs
+        assert "PEPTLDE" in bare_seqs
+        # No brackets in the bare column.
+        for bare in bare_seqs:
+            assert "[" not in bare, f"Bracket found in bare column: {bare!r}"
+
+    def test_peptides_txt_canonical_bare(self, tmp_path):
+        """Bare column applies isobaric substitutions (I→L, N[Deamidated]→D, Q[Deamidated]→E)."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [
+                ("AN[Deamidated]G", [100.0], [1.0]),
+                ("AQ[Deamidated]G", [100.0], [1.0]),
+                ("AIKG", [100.0], [1.0]),
+            ]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(17)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                all_rows.append((cols[0], cols[1]))
+
+        bare_by_modified = dict(all_rows)
+        # N[Deamidated] → D in bare column.
+        assert bare_by_modified.get("AN[Deamidated]G") == "ADG"
+        # Q[Deamidated] → E in bare column.
+        assert bare_by_modified.get("AQ[Deamidated]G") == "AEG"
+        # I → L in bare column.
+        assert bare_by_modified.get("AIKG") == "ALKG"
+
+    def test_peptides_txt_sorted(self, tmp_path):
+        """peptides.txt rows are sorted by bare sequence then modified sequence."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i:02d}", [100.0], [1.0]) for i in range(20)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            rows = [line.split("\t") for line in lines]
+            keys = [(r[1], r[0]) for r in rows]
+            assert keys == sorted(keys), f"{split} peptides.txt is not sorted"
+
+    def test_peptides_txt_unique(self, tmp_path):
+        """peptides.txt has one row per unique modified sequence."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEPTIDE", [100.0], [1.0])] * 5
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_modified: list[str] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            all_modified += [line.split("\t")[0] for line in lines]
+
+        assert all_modified.count("PEPTIDE") == 1
+
+    # ------------------------------------------------------------------
+    # --mskb-format
+    # ------------------------------------------------------------------
+
+    def test_mskb_format_converts_sequences(self, tmp_path):
+        """mskb_format=True converts MassIVE-KB sequences to ProForma in output."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("C+57.021PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_seqs: set[str] = set()
+        for split in ("train", "val", "test"):
+            all_seqs.update(_get_peptides(_read_mgf(tmp_path / f"out.{split}.mgf")))
+
+        assert "C[Carbamidomethyl]PEPTIDE" in all_seqs
+        assert "C+57.021PEPTIDE" not in all_seqs
+
+    def test_mskb_format_nterm_converted(self, tmp_path):
+        """mskb_format=True sums and converts combined N-terminal shifts."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("+42.011PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_seqs: set[str] = set()
+        for split in ("train", "val", "test"):
+            all_seqs.update(_get_peptides(_read_mgf(tmp_path / f"out.{split}.mgf")))
+
+        assert "[Acetyl]-PEPTIDE" in all_seqs
+        assert "+42.011PEPTIDE" not in all_seqs
+
+    def test_mskb_format_peptides_txt_columns(self, tmp_path):
+        """With mskb_format=True, peptides.txt has ProForma in col 1 and bare in col 2."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("C+57.021PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                assert len(cols) == 2
+                all_rows.append((cols[0], cols[1]))
+
+        modified_seqs = {r[0] for r in all_rows}
+        bare_seqs = {r[1] for r in all_rows}
+
+        assert "C[Carbamidomethyl]PEPTIDE" in modified_seqs
+        # CPEPTIDE contains I → L, so bare form is CPEPTLDE.
+        assert "CPEPTLDE" in bare_seqs
+        for bare in bare_seqs:
+            assert "[" not in bare
