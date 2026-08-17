@@ -220,9 +220,7 @@ def _collect_peptide_counts(
         f"{len(pep_counts)}"
         + (f" ({n_collapsed} sequences merged)" if n_collapsed > 0 else "")
     )
-    logging.info(
-        f"Unique precursors (sequence + charge state): {len(sampling_counts)}"
-    )
+    logging.info(f"Unique precursors (sequence + charge state): {len(sampling_counts)}")
     return pep_counts, sampling_counts, total_spectra
 
 
