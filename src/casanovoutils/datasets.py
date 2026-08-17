@@ -183,6 +183,7 @@ def _collect_peptide_counts(
     """
     pep_counts: dict[str, int] = {}
     sampling_counts: dict[tuple, int] = {}
+    raw_seqs: set[str] = set()
     total_spectra = 0
     for mgf_file in mgf_files:
         file_count = 0
@@ -202,6 +203,7 @@ def _collect_peptide_counts(
                         f"Missing 'seq' in spectrum params for spectrum "
                         f"{spectrum_index} in file {mgf_file}"
                     ) from exc
+                raw_seqs.add(seq)
                 pep_key = _canonical(seq)
                 pep_counts[pep_key] = pep_counts.get(pep_key, 0) + 1
                 samp_key = _sampling_key(spectrum)
@@ -211,7 +213,16 @@ def _collect_peptide_counts(
         total_spectra += file_count
 
     logging.info(f"Total spectra read: {total_spectra}")
-    logging.info(f"Unique peptides: {len(pep_counts)}")
+    logging.info(f"Unique raw sequences: {len(raw_seqs)}")
+    n_collapsed = len(raw_seqs) - len(pep_counts)
+    logging.info(
+        f"Unique canonical peptides (after I/L and deamidation collapsing): "
+        f"{len(pep_counts)}"
+        + (f" ({n_collapsed} sequences merged)" if n_collapsed > 0 else "")
+    )
+    logging.info(
+        f"Unique precursors (sequence + charge state): {len(sampling_counts)}"
+    )
     return pep_counts, sampling_counts, total_spectra
 
 
@@ -268,9 +279,16 @@ def _assign_splits(
             else:
                 spectra_after += count
         eliminated = total_spectra - spectra_after
+        n_capped = len(sampled_indices)
+        n_precursors = len(sampling_counts)
+        logging.info(
+            f"Unique precursors exceeding spectra_per_precursor="
+            f"{spectra_per_precursor}: {n_capped} of {n_precursors}"
+        )
         logging.info(
             f"Spectra eliminated by spectra_per_precursor="
-            f"{spectra_per_precursor}: {eliminated}"
+            f"{spectra_per_precursor}: {eliminated} "
+            f"({spectra_after} retained)"
         )
 
     # Handle existing splits if provided.
@@ -451,6 +469,13 @@ def _assign_splits(
         pep_to_split[pep] = "val"
     for pep in test_peps:
         pep_to_split[pep] = "test"
+
+    logging.info(
+        f"Canonical peptides assigned: "
+        f"train={len(train_peps)}, "
+        f"val={len(val_peps)}, "
+        f"test={len(test_peps)}"
+    )
 
     return pep_to_split, sampled_indices, existing_peps
 
