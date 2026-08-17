@@ -384,6 +384,31 @@ class TestCreateDatasetsEdgeCases:
                 existing_splits=(split, split),
             )
 
+    def test_existing_splits_mskb_notation_raises_error(self, tmp_path):
+        """existing_splits containing MassIVE-KB PTM notation should raise ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        # Write a split MGF with a MassIVE-KB-style sequence (mass shift notation).
+        mskb_split = tmp_path / "mskb_split.mgf"
+        pyteomics.mgf.write(
+            [
+                {
+                    "params": {"seq": "C+57.021PEPTIDE", "pepmass": (900.0,)},
+                    "m/z array": np.array([100.0]),
+                    "intensity array": np.array([1.0]),
+                }
+            ],
+            output=str(mskb_split),
+        )
+        with pytest.raises(ValueError, match="MassIVE-KB"):
+            create_datasets(
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=(mskb_split, mskb_split, mskb_split),
+            )
+
     def test_spectra_per_precursor_zero_raises_error(self, tmp_path):
         """Passing spectra_per_precursor=0 should raise a ValueError."""
         mgf = _write_mgf(
