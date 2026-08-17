@@ -19,13 +19,13 @@ from .types import Commands
 # Number of spectra to buffer per output file before flushing to disk.
 _WRITE_BUFFER_SIZE = 1000
 
-# Matches a bracket-enclosed modification token and an optional trailing dash
-# (for N-terminal mods like "[Acetyl]-").
-_MOD_RE = re.compile(r"\[[^\]]*\]-?")
+# Matches a bracket-enclosed modification token with an optional leading or
+# trailing dash (N-terminal: "[Acetyl]-"; C-terminal: "-[Amidated]").
+_MOD_RE = re.compile(r"-?\[[^\]]*\]-?")
 
-# Matches MassIVE-KB PTM notation: a sign+decimal mass shift at the start of
-# a sequence (N-terminal) or immediately after a residue letter.
-_MSKB_SEQ_RE = re.compile(r"(?:^|[A-Z])[+-]\d+\.\d+")
+# Matches MassIVE-KB PTM notation: a sign+mass shift (integer or decimal) at
+# the start of a sequence (N-terminal) or immediately after a residue letter.
+_MSKB_SEQ_RE = re.compile(r"(?:^|[A-Z])[+-]\d+(?:\.\d+)?")
 
 
 def _canonical(seq: str) -> str:
@@ -663,8 +663,8 @@ def create_datasets(
         If False, only new spectra are written.
     mskb_format : bool, default=False
         If True, input MGF files are assumed to use MassIVE-KB PTM notation
-        and are converted to ProForma format before splitting. The output MGF
-        files always contain ProForma sequences.
+        and are converted to ProForma format before splitting. Conversion
+        raises a ``ValueError`` if any sequence cannot be converted.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
