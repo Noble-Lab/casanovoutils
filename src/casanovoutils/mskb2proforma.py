@@ -166,7 +166,8 @@ def convert(
                 n_converted += 1
             except Exception as exc:
                 raise ValueError(
-                    f"Could not convert sequence {original!r} to ProForma: {exc}"
+                    f"Could not convert sequence {original!r} in {input_file} "
+                    f"to ProForma: {exc}"
                 ) from exc
         return {**spectrum, "params": params}
 
