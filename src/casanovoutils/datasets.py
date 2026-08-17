@@ -23,6 +23,10 @@ _WRITE_BUFFER_SIZE = 1000
 # (for N-terminal mods like "[Acetyl]-").
 _MOD_RE = re.compile(r"\[[^\]]*\]-?")
 
+# Matches MassIVE-KB PTM notation: a sign+decimal mass shift at the start of
+# a sequence (N-terminal) or immediately after a residue letter.
+_MSKB_SEQ_RE = re.compile(r"(?:^|[A-Z])[+-]\d+\.\d+")
+
 
 def _canonical(seq: str) -> str:
     """Return the canonical form of a peptide sequence.
@@ -86,17 +90,19 @@ def _strip_mods(seq: str) -> str:
     return _MOD_RE.sub("", seq)
 
 
-def _write_peptides_txt(output_root: str) -> None:
+def _write_peptides_txt(
+    output_root: str,
+    mod_to_bare_by_split: dict[str, dict[str, str]],
+) -> None:
     """Write ``<split>.peptides.txt`` files for each split.
 
-    Reads each output MGF and collects every unique ``seq`` value.  Each output
-    line contains two tab-separated columns: the modified sequence (ProForma,
-    as it appears in the MGF) and the canonical bare sequence.  The canonical
-    bare sequence is produced by applying the same isobaric substitutions used
-    for splitting (I→L, N[Deamidated]→D, Q[Deamidated]→E) and then stripping
-    all remaining modification tokens, so mass-equivalent variants share a
-    single bare sequence.  Lines are sorted alphabetically by the canonical
-    bare sequence, then by the modified sequence.
+    Each output line contains two tab-separated columns: the modified sequence
+    (ProForma, as it appears in the MGF) and the canonical bare sequence.  The
+    canonical bare sequence is produced by applying the same isobaric
+    substitutions used for splitting (I→L, N[Deamidated]→D, Q[Deamidated]→E)
+    and then stripping all remaining modification tokens, so mass-equivalent
+    variants share a single bare sequence.  Lines are sorted alphabetically by
+    the canonical bare sequence, then by the modified sequence.
 
     Also logs, per split, the number of unique modified sequences and the
     number of unique bare sequences.
@@ -104,18 +110,14 @@ def _write_peptides_txt(output_root: str) -> None:
     Parameters
     ----------
     output_root : str
-        Root path used to locate output MGF files and write peptides files.
+        Root path used to write peptides files.
+    mod_to_bare_by_split : dict[str, dict[str, str]]
+        Mapping of split name to ``{modified_seq: bare_seq}`` dict, collected
+        during pass 2 by ``_write_splits``.
     """
     for split in ("train", "val", "test"):
-        mgf_path = pathlib.Path(f"{output_root}.{split}.mgf")
         pep_path = pathlib.Path(f"{output_root}.{split}.peptides.txt")
-        # Map modified seq -> bare seq (many-to-one).
-        mod_to_bare: dict[str, str] = {}
-        with pyteomics.mgf.read(str(mgf_path), use_index=False) as reader:
-            for spectrum in reader:
-                seq = spectrum["params"].get("seq")
-                if seq and seq not in mod_to_bare:
-                    mod_to_bare[seq] = _strip_mods(_canonical(seq))
+        mod_to_bare = mod_to_bare_by_split[split]
         pairs = sorted(mod_to_bare.items(), key=lambda kv: (kv[1], kv[0]))
         with open(pep_path, "w") as fh:
             for modified, bare in pairs:
@@ -448,7 +450,7 @@ def _write_splits(
     spectra_per_precursor: Optional[int],
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     combine_with_existing: bool,
-) -> tuple[dict[str, int], dict[str, set[str]]]:
+) -> tuple[dict[str, int], dict[str, set[str]], dict[str, dict[str, str]]]:
     """Pass 2: stream spectra to output MGF files.
 
     Parameters
@@ -474,6 +476,9 @@ def _write_splits(
         Number of spectra written to each split.
     split_pep_sets : dict[str, set[str]]
         Set of new canonical peptides assigned to each split.
+    mod_to_bare_by_split : dict[str, dict[str, str]]
+        Per-split mapping of modified sequence to canonical bare sequence,
+        collected during writing for use by ``_write_peptides_txt``.
     """
     split_pep_sets = {
         split: {pep for pep, s in pep_to_split.items() if s == split}
@@ -488,6 +493,12 @@ def _write_splits(
         "train": 0,
         "val": 0,
         "test": 0,
+    }
+
+    mod_to_bare_by_split: dict[str, dict[str, str]] = {
+        "train": {},
+        "val": {},
+        "test": {},
     }
 
     with (
@@ -516,7 +527,10 @@ def _write_splits(
                 buffers[split_name].clear()
 
         def write_spectrum(split_name: str, spectrum: dict) -> None:
-            """Buffer a spectrum and flush when buffer is full."""
+            """Buffer a spectrum, track its sequence, and flush when full."""
+            seq = spectrum["params"].get("seq")
+            if seq and seq not in mod_to_bare_by_split[split_name]:
+                mod_to_bare_by_split[split_name][seq] = _strip_mods(_canonical(seq))
             buffers[split_name].append(spectrum)
             split_spectra_counts[split_name] += 1
             if len(buffers[split_name]) >= _WRITE_BUFFER_SIZE:
@@ -567,7 +581,7 @@ def _write_splits(
         for split_name in ("train", "val", "test"):
             flush_buffer(split_name)
 
-    return split_spectra_counts, split_pep_sets
+    return split_spectra_counts, split_pep_sets, mod_to_bare_by_split
 
 
 def create_datasets(
@@ -634,7 +648,9 @@ def create_datasets(
     existing_splits : tuple of PathLike, optional
         A tuple of three MGF file paths (train, validation, test) containing
         pre-existing splits. Peptides from new input files that already appear
-        in an existing split are routed to that same split.
+        in an existing split are routed to that same split. The files must use
+        ProForma sequence notation; MassIVE-KB notation is not supported and
+        will raise a ``ValueError``.
     combine_with_existing : bool, default=False
         If True, output MGF files include both existing and new spectra.
         If False, only new spectra are written.
@@ -656,6 +672,21 @@ def create_datasets(
         raise ValueError(
             "combine_with_existing=True requires existing_splits to be provided."
         )
+
+    if existing_splits is not None:
+        split_names = ("train", "val", "test")
+        for split_name, split_path in zip(split_names, existing_splits):
+            with pyteomics.mgf.read(str(split_path), use_index=False) as reader:
+                for spectrum in reader:
+                    seq = spectrum["params"].get("seq", "")
+                    if seq and _MSKB_SEQ_RE.search(seq):
+                        raise ValueError(
+                            f"Existing split '{split_name}' ({split_path}) "
+                            f"appears to use MassIVE-KB PTM notation "
+                            f"(e.g. sequence {seq!r}). "
+                            f"existing_splits must be in ProForma format."
+                        )
+                    break  # Only check first spectrum per file.
 
     if not overwrite:
         expected_files = [
@@ -698,7 +729,7 @@ def create_datasets(
             spectra_per_precursor,
         )
 
-        split_spectra_counts, split_pep_sets = _write_splits(
+        split_spectra_counts, split_pep_sets, mod_to_bare_by_split = _write_splits(
             mgf_files,
             output_root,
             pep_to_split,
@@ -723,7 +754,7 @@ def create_datasets(
         else:
             logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
 
-    _write_peptides_txt(output_root)
+    _write_peptides_txt(output_root, mod_to_bare_by_split)
 
 
 COMMANDS: Commands = create_datasets
