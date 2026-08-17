@@ -166,26 +166,27 @@ def _collect_peptide_counts(
     total_spectra = 0
     for mgf_file in mgf_files:
         file_count = 0
-        for spectrum_index, spectrum in enumerate(
-            tqdm.tqdm(
-                pyteomics.mgf.read(str(mgf_file), use_index=False),
-                desc=f"Reading {mgf_file} (pass 1)",
-                unit="PSM",
-            ),
-            start=1,
-        ):
-            try:
-                seq = spectrum["params"]["seq"]
-            except KeyError as exc:
-                raise KeyError(
-                    f"Missing 'seq' in spectrum params for spectrum "
-                    f"{spectrum_index} in file {mgf_file}"
-                ) from exc
-            pep_key = _canonical(seq)
-            pep_counts[pep_key] = pep_counts.get(pep_key, 0) + 1
-            samp_key = _sampling_key(spectrum)
-            sampling_counts[samp_key] = sampling_counts.get(samp_key, 0) + 1
-            file_count += 1
+        with pyteomics.mgf.read(str(mgf_file), use_index=False) as reader:
+            for spectrum_index, spectrum in enumerate(
+                tqdm.tqdm(
+                    reader,
+                    desc=f"Reading {mgf_file} (pass 1)",
+                    unit="PSM",
+                ),
+                start=1,
+            ):
+                try:
+                    seq = spectrum["params"]["seq"]
+                except KeyError as exc:
+                    raise KeyError(
+                        f"Missing 'seq' in spectrum params for spectrum "
+                        f"{spectrum_index} in file {mgf_file}"
+                    ) from exc
+                pep_key = _canonical(seq)
+                pep_counts[pep_key] = pep_counts.get(pep_key, 0) + 1
+                samp_key = _sampling_key(spectrum)
+                sampling_counts[samp_key] = sampling_counts.get(samp_key, 0) + 1
+                file_count += 1
         logging.info(f"Read {file_count} spectra from {mgf_file}.")
         total_spectra += file_count
 
@@ -267,20 +268,21 @@ def _assign_splits(
                 f"were provided."
             )
         for split_name, split_path in zip(split_names, existing_splits, strict=True):
-            for spectrum in tqdm.tqdm(
-                pyteomics.mgf.read(str(split_path), use_index=False),
-                desc=f"Reading existing {split_name}",
-                unit="PSM",
-            ):
-                try:
-                    seq = spectrum["params"]["seq"]
-                except KeyError as exc:
-                    raise KeyError(
-                        f"Missing 'seq' in spectrum params while reading "
-                        f"existing split '{split_name}' from file "
-                        f"'{split_path}'"
-                    ) from exc
-                existing_peps[split_name].add(_canonical(seq))
+            with pyteomics.mgf.read(str(split_path), use_index=False) as reader:
+                for spectrum in tqdm.tqdm(
+                    reader,
+                    desc=f"Reading existing {split_name}",
+                    unit="PSM",
+                ):
+                    try:
+                        seq = spectrum["params"]["seq"]
+                    except KeyError as exc:
+                        raise KeyError(
+                            f"Missing 'seq' in spectrum params while reading "
+                            f"existing split '{split_name}' from file "
+                            f"'{split_path}'"
+                        ) from exc
+                    existing_peps[split_name].add(_canonical(seq))
             logging.info(
                 f"Existing {split_name}: "
                 f"{len(existing_peps[split_name])} peptide"
@@ -514,38 +516,40 @@ def _write_splits(
             for split_name, split_path in zip(
                 split_names, existing_splits, strict=True
             ):
-                for spectrum in tqdm.tqdm(
-                    pyteomics.mgf.read(str(split_path), use_index=False),
-                    desc=f"Writing existing {split_name} (pass 2)",
-                    unit="PSM",
-                ):
-                    write_spectrum(split_name, spectrum)
+                with pyteomics.mgf.read(str(split_path), use_index=False) as reader:
+                    for spectrum in tqdm.tqdm(
+                        reader,
+                        desc=f"Writing existing {split_name} (pass 2)",
+                        unit="PSM",
+                    ):
+                        write_spectrum(split_name, spectrum)
 
         # Stream new input MGFs.
         pep_counters: dict[tuple, int] = {}
         for mgf_file in mgf_files:
-            for spectrum in tqdm.tqdm(
-                pyteomics.mgf.read(str(mgf_file), use_index=False),
-                desc=f"Writing {mgf_file} (pass 2)",
-                unit="PSM",
-            ):
-                seq = spectrum["params"]["seq"]
-                pep_key = _canonical(seq)
-                samp_key = _sampling_key(spectrum)
+            with pyteomics.mgf.read(str(mgf_file), use_index=False) as reader:
+                for spectrum in tqdm.tqdm(
+                    reader,
+                    desc=f"Writing {mgf_file} (pass 2)",
+                    unit="PSM",
+                ):
+                    seq = spectrum["params"]["seq"]
+                    pep_key = _canonical(seq)
+                    samp_key = _sampling_key(spectrum)
 
-                # Apply spectra_per_precursor filtering per (peptide, charge).
-                if spectra_per_precursor is not None:
-                    idx = pep_counters.get(samp_key, 0)
-                    pep_counters[samp_key] = idx + 1
-                    if samp_key in sampled_indices:
-                        if idx not in sampled_indices[samp_key]:
-                            continue
-                    # If samp_key not in sampled_indices, count <= limit,
-                    # so keep all.
+                    # Apply spectra_per_precursor filtering per (peptide, charge).
+                    if spectra_per_precursor is not None:
+                        idx = pep_counters.get(samp_key, 0)
+                        pep_counters[samp_key] = idx + 1
+                        if samp_key in sampled_indices:
+                            if idx not in sampled_indices[samp_key]:
+                                continue
+                        # If samp_key not in sampled_indices, count <= limit,
+                        # so keep all.
 
-                split_name = pep_to_split.get(pep_key)
-                if split_name is not None:
-                    write_spectrum(split_name, spectrum)
+                    split_name = pep_to_split.get(pep_key)
+                    if split_name is not None:
+                        write_spectrum(split_name, spectrum)
 
         # Flush remaining buffers.
         for split_name in ("train", "val", "test"):
