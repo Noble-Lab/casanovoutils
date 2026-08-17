@@ -86,8 +86,9 @@ casanovoutils follows a standard GitHub workflow with a few important specifics:
 5. Commit and push to your fork
 6. Open a Pull Request (PR) **targeting the `dev` branch**
 
-> [!NOTE]
-> The `main` branch is reserved for stable releases. All active development happens in `dev`.
+```{note}
+The `main` branch is reserved for stable releases. All active development happens in `dev`.
+```
 
 ## Pull request requirements
 
@@ -101,7 +102,7 @@ In addition, all PRs are automatically linted and tested.
 Your contribution must pass all tests and conform to the expected code style.
 Running `black` and `isort` locally (see below) is strongly recommended to avoid unnecessary iteration.
 
-Only once all automated checks pass and CodeRabbit feedback has been addressed you should request a maintainer review.
+Request a maintainer review only after all automated checks pass and all CodeRabbit feedback has been addressed.
 At that point, please tag **@wsnoble**.
 PRs that are not yet ready will not be reviewed.
 
@@ -141,8 +142,7 @@ uv run black src/ tests/
 We strongly recommend setting up pre-commit hooks so that formatting issues are caught before committing:
 
 ```bash
-pip install black isort pre-commit
-pre-commit install
+uvx pre-commit install
 ```
 
 ## Use of AI coding tools
