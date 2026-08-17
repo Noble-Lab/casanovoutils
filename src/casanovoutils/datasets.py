@@ -89,7 +89,7 @@ def _strip_mods(seq: str) -> str:
 def _write_peptides_txt(output_root: str) -> None:
     """Write ``<split>.peptides.txt`` files for each split.
 
-    Reads each output MGF and collects every unique SEQ value.  Each output
+    Reads each output MGF and collects every unique ``seq`` value.  Each output
     line contains two tab-separated columns: the modified sequence (ProForma,
     as it appears in the MGF) and the canonical bare sequence.  The canonical
     bare sequence is produced by applying the same isobaric substitutions used

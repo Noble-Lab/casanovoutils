@@ -174,7 +174,7 @@ class TestCreateDatasetsMultipleFiles:
         assert any(p.startswith("PEPB") for p in all_peps)
 
 
-class TestCreateDatasetsSpectraPerPeptide:
+class TestCreateDatasetsSpectraPerPrecursor:
     """Tests for the spectra_per_precursor option."""
 
     def test_limits_spectra_per_precursor(self, tmp_path):
