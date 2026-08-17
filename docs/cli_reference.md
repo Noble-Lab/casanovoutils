@@ -435,8 +435,13 @@ casanovoutils summarize_mgf peptide-lengths input.mgf
 
 Create peptide-level train/validation/test splits from annotated MGF files.
 Peptides are split 80 / 10 / 10 by unique sequence to prevent leakage between
-splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
-`.test.mgf`.
+splits.
+
+For each split, the following output files are written:
+
+- `<output_root>.{train,val,test}.mgf` — spectra assigned to each split
+- `<output_root>.{train,val,test}.peptides.txt` — tab-separated modified and bare sequences
+- `<output_root>.log.txt` — run log with spectrum and peptide counts
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -447,6 +452,7 @@ splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
 | `--overwrite` | bool | `False` | Overwrite existing output files |
 | `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
 | `--combine_with_existing` | bool | `False` | Include existing spectra in output alongside new ones |
+| `--mskb_format` | bool | `False` | Convert input sequences from MassIVE-KB PTM notation to ProForma before splitting |
 
 **Examples:**
 
@@ -457,6 +463,9 @@ casanovoutils datasets input.mgf --output_root splits/run1
 # Multiple input files, cap at 3 spectra per precursor
 casanovoutils datasets a.mgf b.mgf --output_root splits/combined \
   --spectra_per_precursor 3
+
+# Convert MassIVE-KB PTM notation to ProForma before splitting
+casanovoutils datasets input.mgf --output_root splits/run1 --mskb_format
 ```
 
 ---
