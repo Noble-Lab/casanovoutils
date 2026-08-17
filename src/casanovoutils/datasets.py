@@ -17,6 +17,49 @@ from .types import Commands
 _WRITE_BUFFER_SIZE = 1000
 
 
+def _canonical(seq: str) -> str:
+    """Return the canonical form of a peptide sequence.
+
+    Residues that are indistinguishable by mass spectrometry are mapped to a
+    single representative token so that mass-equivalent variants are always
+    grouped together during splitting:
+
+    * Isoleucine (I) → Leucine (L)  [identical mass]
+    * N[Deamidated] → D  [deamidation of Asn yields Asp; identical mass]
+    * Q[Deamidated] → E  [deamidation of Gln yields Glu; identical mass]
+
+    The canonical form is used only as a grouping key; original sequences are
+    preserved unchanged in the output MGF files.
+
+    Parameters
+    ----------
+    seq : str
+        Peptide sequence, optionally containing bracket-enclosed modifications
+        in the form ``AA[ModName]``.
+
+    Returns
+    -------
+    str
+        Canonical peptide sequence.
+    """
+    # Replace I with L only at residue positions (bracket depth 0), so that
+    # uppercase I characters inside modification names are left untouched.
+    chars = []
+    depth = 0
+    for ch in seq:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        elif ch == "I" and depth == 0:
+            ch = "L"
+        chars.append(ch)
+    seq = "".join(chars)
+    seq = seq.replace("N[Deamidated]", "D")
+    seq = seq.replace("Q[Deamidated]", "E")
+    return seq
+
+
 def _collect_peptide_counts(
     mgf_files: tuple[PathLike, ...],
 ) -> tuple[dict[str, int], int]:
@@ -30,7 +73,7 @@ def _collect_peptide_counts(
     Returns
     -------
     pep_counts : dict[str, int]
-        Mapping of peptide sequence to spectrum count.
+        Mapping of canonical peptide sequence to spectrum count.
     total_spectra : int
         Total number of spectra read across all files.
     """
@@ -53,7 +96,8 @@ def _collect_peptide_counts(
                     f"Missing 'seq' in spectrum params for spectrum "
                     f"{spectrum_index} in file {mgf_file}"
                 ) from exc
-            pep_counts[seq] = pep_counts.get(seq, 0) + 1
+            key = _canonical(seq)
+            pep_counts[key] = pep_counts.get(key, 0) + 1
             file_count += 1
         logging.info(f"Read {file_count} spectra from {mgf_file}.")
         total_spectra += file_count
@@ -76,7 +120,7 @@ def _assign_splits(
     Parameters
     ----------
     pep_counts : dict[str, int]
-        Mapping of peptide sequence to spectrum count from pass 1.
+        Mapping of canonical peptide sequence to spectrum count from pass 1.
     total_spectra : int
         Total spectra across all input files.
     existing_splits : tuple of PathLike or None
@@ -87,13 +131,14 @@ def _assign_splits(
     Returns
     -------
     pep_to_split : dict[str, str]
-        Mapping of peptide sequence to split name ("train", "val", "test").
+        Mapping of canonical peptide sequence to split name
+        ("train", "val", "test").
     sampled_indices : dict[str, set[int]]
         For peptides that exceed spectra_per_peptide, the 0-based indices
         of spectra to retain. Empty dict if spectra_per_peptide is None.
     existing_peps : dict[str, set[str]]
-        Peptides already present in each existing split. Empty sets if
-        existing_splits is None.
+        Canonical peptides already present in each existing split. Empty sets
+        if existing_splits is None.
     """
     # Pre-compute which spectrum indices to keep for each peptide when
     # spectra_per_peptide is set.
@@ -142,7 +187,7 @@ def _assign_splits(
                         f"existing split '{split_name}' from file "
                         f"'{split_path}'"
                     ) from exc
-                existing_peps[split_name].add(seq)
+                existing_peps[split_name].add(_canonical(seq))
             logging.info(
                 f"Existing {split_name}: "
                 f"{len(existing_peps[split_name])} peptide"
@@ -306,7 +351,7 @@ def _write_splits(
     output_root : str
         Root path for output files.
     pep_to_split : dict[str, str]
-        Mapping from peptide sequence to split name.
+        Mapping from canonical peptide sequence to split name.
     sampled_indices : dict[str, set[int]]
         Per-peptide sets of 0-based spectrum indices to retain.
     spectra_per_peptide : int or None
@@ -321,7 +366,7 @@ def _write_splits(
     split_spectra_counts : dict[str, int]
         Number of spectra written to each split.
     split_pep_sets : dict[str, set[str]]
-        Set of new peptides assigned to each split.
+        Set of new canonical peptides assigned to each split.
     """
     split_pep_sets = {
         split: {pep for pep, s in pep_to_split.items() if s == split}
@@ -392,18 +437,19 @@ def _write_splits(
                 unit="PSM",
             ):
                 seq = spectrum["params"]["seq"]
+                key = _canonical(seq)
 
                 # Apply spectra_per_peptide filtering.
                 if spectra_per_peptide is not None:
-                    idx = pep_counters.get(seq, 0)
-                    pep_counters[seq] = idx + 1
-                    if seq in sampled_indices:
-                        if idx not in sampled_indices[seq]:
+                    idx = pep_counters.get(key, 0)
+                    pep_counters[key] = idx + 1
+                    if key in sampled_indices:
+                        if idx not in sampled_indices[key]:
                             continue
-                    # If seq not in sampled_indices, count <= limit,
+                    # If key not in sampled_indices, count <= limit,
                     # so keep all.
 
-                split_name = pep_to_split.get(seq)
+                split_name = pep_to_split.get(key)
                 if split_name is not None:
                     write_spectrum(split_name, spectrum)
 
@@ -430,6 +476,20 @@ def create_datasets(
     validation (10%), and test (10%) sets. Spectra are then assigned to splits
     based on their associated peptide, ensuring no peptide-level leakage
     between splits.
+
+    Several pairs of residues are indistinguishable by mass spectrometry and
+    are always grouped together during splitting to prevent leakage:
+
+    * Isoleucine (I) and leucine (L) have identical masses.
+    * Deamidated asparagine (N[Deamidated]) and aspartic acid (D) have
+      identical masses.
+    * Deamidated glutamine (Q[Deamidated]) and glutamic acid (E) have
+      identical masses.
+
+    Each spectrum's peptide sequence is mapped to a canonical form (see
+    ``_canonical``) before the split assignment is looked up, so all
+    mass-equivalent variants are always grouped together. The original
+    sequences are preserved unchanged in the output MGF files.
 
     Parameters
     ----------

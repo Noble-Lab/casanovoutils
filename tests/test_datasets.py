@@ -692,3 +692,350 @@ class TestCreateDatasetsExistingSplits:
                 existing_splits=existing,
                 combine_with_existing=True,
             )
+
+
+class TestCreateDatasetsIsobaricNormalization:
+    """Tests for isobaric normalization during splitting (I/L and deamidation)."""
+
+    def test_il_variants_land_in_same_split(self, tmp_path):
+        """Peptides differing only by I/L are placed in the same split."""
+        # PEPTIDE and PEPTLDE are I/L variants of each other.
+        # Add enough unrelated peptides to trigger real splitting.
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for split_name, split in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in split):
+                    return split_name
+            return None
+
+        assert find_split("PEPTIDE") == find_split(
+            "PEPTLDE"
+        ), "I/L variants must land in the same split"
+
+    def test_il_variants_counted_as_one_peptide(self, tmp_path):
+        """I/L variants count as a single peptide due to isobaric normalization."""
+        # 10 I/L pairs + 80 unique = 90 sequences but only 80+10=90 canonical
+        # peptides... actually each pair shares a canonical form, so 10 pairs
+        # contribute 10 canonical peptides rather than 20.
+        spectra = []
+        for i in range(10):
+            spectra.append((f"PEP{i}I", [100.0], [1.0]))  # with I
+            spectra.append((f"PEP{i}L", [100.0], [1.0]))  # same canonical
+        for i in range(80):
+            spectra.append((f"UNIQ{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        # Total spectra must be preserved.
+        assert len(train) + len(val) + len(test) == len(spectra)
+
+        # Each I/L pair must be in the same split.
+        for i in range(10):
+            i_seq = f"PEP{i}I"
+            l_seq = f"PEP{i}L"
+
+            def find_split(seq, tr=train, v=val, te=test):
+                for name, sp in [("train", tr), ("val", v), ("test", te)]:
+                    if any(s["params"]["seq"] == seq for s in sp):
+                        return name
+                return None
+
+            assert find_split(i_seq) == find_split(
+                l_seq
+            ), f"I/L pair PEP{i}I / PEP{i}L must be in the same split"
+
+    def test_isobaric_normalization_is_unconditional(self, tmp_path):
+        """Isobaric normalization is always applied; there is no opt-out."""
+        # Verify that PEPTIDE and PEPTLDE (I/L variants) always land in the
+        # same split regardless of how create_datasets is called.
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        assert find_split("PEPTIDE") == find_split("PEPTLDE")
+        # All spectra are preserved.
+        assert len(train) + len(val) + len(test) == len(spectra)
+
+    def test_original_sequences_preserved_in_output(self, tmp_path):
+        """Output MGF files retain original sequences despite isobaric normalization."""
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        all_seqs = set(_get_peptides(train + val + test))
+        # Original sequences (not their canonical forms) must be preserved.
+        assert "PEPTIDE" in all_seqs
+        assert "PEPTLDE" in all_seqs
+
+    def test_il_normalization_with_existing_splits(self, tmp_path):
+        """I/L variant in new data routes to the correct existing split."""
+        # Existing train split contains PEPTLDE (L-form).
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("PEPTLDE", [100.0], [1.0])]
+            + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [(f"VA{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [(f"TE{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        existing = (train_path, val_path, test_path)
+
+        # New data has PEPTIDE (I-form), the I/L variant of PEPTLDE.
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("PEPTIDE", [100.0], [1.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+        )
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        train_seqs = set(_get_peptides(train))
+        val_seqs = set(_get_peptides(val))
+        test_seqs = set(_get_peptides(test))
+
+        # PEPTIDE (I-form) must land in train alongside PEPTLDE (L-form).
+        assert "PEPTIDE" in train_seqs, "I-form should follow L-form into train"
+        assert "PEPTIDE" not in val_seqs
+        assert "PEPTIDE" not in test_seqs
+
+    def test_il_normalization_always_applied(self, tmp_path):
+        """I/L variants are always placed in the same split."""
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        assert find_split("PEPTIDE") == find_split(
+            "PEPTLDE"
+        ), "Default behavior must place I/L variants in the same split"
+
+    def test_deamidated_n_and_d_land_in_same_split(self, tmp_path):
+        """N[Deamidated] and D variants of the same peptide land in the same split."""
+        spectra = [
+            ("PEPTN[Deamidated]DE", [100.0], [1.0]),
+            ("PEPTDDE", [100.0], [1.0]),
+        ]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        split_n = find_split("PEPTN[Deamidated]DE")
+        split_d = find_split("PEPTDDE")
+        assert split_n is not None, "PEPTN[Deamidated]DE not found in any split"
+        assert split_d is not None, "PEPTDDE not found in any split"
+        assert (
+            split_n == split_d
+        ), "N[Deamidated] and D variants must land in the same split"
+
+    def test_deamidated_q_and_e_land_in_same_split(self, tmp_path):
+        """Q[Deamidated] and E variants of the same peptide land in the same split."""
+        spectra = [
+            ("PEPTQ[Deamidated]DE", [100.0], [1.0]),
+            ("PEPTEDE", [100.0], [1.0]),
+        ]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        split_q = find_split("PEPTQ[Deamidated]DE")
+        split_e = find_split("PEPTEDE")
+        assert split_q is not None, "PEPTQ[Deamidated]DE not found in any split"
+        assert split_e is not None, "PEPTEDE not found in any split"
+        assert (
+            split_q == split_e
+        ), "Q[Deamidated] and E variants must land in the same split"
+
+    def test_all_three_normalizations_together(self, tmp_path):
+        """A peptide with I, N[Deamidated], and Q[Deamidated] is grouped with
+        its fully-canonical D/E/L equivalent."""
+        # IN[Deamidated]Q[Deamidated]K → LDEK after full canonicalization.
+        spectra = [
+            ("IN[Deamidated]Q[Deamidated]K", [100.0], [1.0]),
+            ("LDEK", [100.0], [1.0]),
+        ]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        def find_split(seq):
+            for name, sp in [("train", train), ("val", val), ("test", test)]:
+                if any(s["params"]["seq"] == seq for s in sp):
+                    return name
+            return None
+
+        split_inqk = find_split("IN[Deamidated]Q[Deamidated]K")
+        split_ldek = find_split("LDEK")
+        assert (
+            split_inqk is not None
+        ), "IN[Deamidated]Q[Deamidated]K not found in any split"
+        assert split_ldek is not None, "LDEK not found in any split"
+        assert split_inqk == split_ldek, (
+            "Peptide with I, N[Deamidated], and Q[Deamidated] must land in "
+            "the same split as its canonical D/E/L form"
+        )
+
+    def test_deamidation_normalization_preserves_original_sequences(self, tmp_path):
+        """Output MGFs retain original sequences even with deamidation normalization."""
+        spectra = [
+            ("PEPTN[Deamidated]DE", [100.0], [1.0]),
+            ("PEPTDDE", [100.0], [1.0]),
+        ]
+        for i in range(28):
+            spectra.append((f"OTHER{i}", [100.0], [1.0]))
+        mgf = _write_mgf(tmp_path / "input.mgf", spectra)
+        output_root = str(tmp_path / "out")
+
+        create_datasets(mgf, output_root=output_root)
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        all_seqs = set(_get_peptides(train + val + test))
+        assert (
+            "PEPTN[Deamidated]DE" in all_seqs
+        ), "Original N[Deamidated] sequence must be preserved in output"
+        assert "PEPTDDE" in all_seqs
+
+    def test_deamidation_with_existing_splits(self, tmp_path):
+        """N[Deamidated]-form in new data routes to the split containing the D-form."""
+        train_path = _write_mgf(
+            tmp_path / "exist_train.mgf",
+            [("PEPTDDE", [100.0], [1.0])]
+            + [(f"TR{i}", [100.0], [1.0]) for i in range(7)],
+        )
+        val_path = _write_mgf(
+            tmp_path / "exist_val.mgf",
+            [(f"VA{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        test_path = _write_mgf(
+            tmp_path / "exist_test.mgf",
+            [(f"TE{i}", [100.0], [1.0]) for i in range(1)],
+        )
+        existing = (train_path, val_path, test_path)
+
+        mgf = _write_mgf(
+            tmp_path / "new.mgf",
+            [("PEPTN[Deamidated]DE", [100.0], [1.0])]
+            + [(f"NEW{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        output_root = str(tmp_path / "out")
+
+        create_datasets(
+            mgf,
+            output_root=output_root,
+            existing_splits=existing,
+        )
+
+        train = _read_mgf(tmp_path / "out.train.mgf")
+        val = _read_mgf(tmp_path / "out.val.mgf")
+        test = _read_mgf(tmp_path / "out.test.mgf")
+
+        train_seqs = set(_get_peptides(train))
+        val_seqs = set(_get_peptides(val))
+        test_seqs = set(_get_peptides(test))
+
+        assert (
+            "PEPTN[Deamidated]DE" in train_seqs
+        ), "N[Deamidated]-form should follow D-form into train"
+        assert "PEPTN[Deamidated]DE" not in val_seqs
+        assert "PEPTN[Deamidated]DE" not in test_seqs
