@@ -1,63 +1,47 @@
-# Contributing
+# Contributing to casanovoutils
 
-Thank you for your interest in contributing to casanovoutils! We welcome bug
-reports, feature requests, documentation improvements, and code contributions.
+First off, thank you for taking the time to contribute.
 
-## Reporting issues
+The following document provides guidelines for contributing to both the documentation and the code of casanovoutils.
+**No contribution is too small!**
+Even fixing a simple typo is genuinely appreciated.
 
-Please open an issue on
-[GitHub](https://github.com/Noble-Lab/casanovoutils/issues) and include:
+At the same time, we aim to maintain a high-quality, sustainable codebase.
+These guidelines help ensure that contributions are useful, maintainable, and respectful of reviewers' time.
+
+## Before you start
+
+If you're unsure whether something is already being worked on, or whether your idea fits within the project scope, **please open an issue or ask the maintainers first**.
+This helps avoid duplicated work and ensures your effort has the highest impact.
+
+Please open an issue on [GitHub](https://github.com/Noble-Lab/casanovoutils/issues) and include:
 
 - A clear description of the problem or request.
 - Steps to reproduce the issue (for bugs).
 - The versions of casanovoutils and Python you are using.
 
-## Setting up a development environment
+## Contributing to the documentation
 
-Clone the repository and install the package with development dependencies
-using uv:
+We use [Sphinx](https://www.sphinx-doc.org/en/master/) to generate and deploy our documentation. Most pages are written in Markdown.
 
-```bash
-git clone https://github.com/Noble-Lab/casanovoutils.git
-cd casanovoutils
-uv sync --group dev
-```
+The API and CLI documentation are generated automatically from code docstrings.
+The Code of Conduct and this Contributing guide live in the `docs/` directory.
 
-## Running the tests
+### Editing most documents
 
-```bash
-uv run pytest tests/
-```
+The easiest way to edit documentation is via the "Edit on GitHub" button on each page:
 
-## Code style
+1. Click "Edit on GitHub"
+2. Click the pencil icon to edit
+3. Make your changes
+4. Fill in a short description
+5. Click "Propose Changes"
 
-casanovoutils uses [black](https://black.readthedocs.io/) for formatting and
-[isort](https://pycqa.github.io/isort/) for import ordering. Before
-submitting a pull request, please run:
+Alternatively, you can edit files locally in the `docs/` directory (see below).
 
-```bash
-uv run isort src/ tests/
-uv run black src/ tests/
-```
+### Building the documentation locally
 
-## Submitting a pull request
-
-1. Fork the repository and create a feature branch from `main`.
-2. Make your changes and add tests where appropriate.
-3. Ensure all tests pass and the code is formatted.
-4. Open a pull request against `main` with a clear description of the changes.
-
-## Building the documentation
-
-Install the documentation dependencies and build locally:
-
-```bash
-pip install -e ".[docs]"
-cd docs
-make html
-```
-
-Or with uv:
+Install the documentation dependencies and build:
 
 ```bash
 uv sync --extra docs
@@ -66,3 +50,127 @@ make html
 ```
 
 The built documentation will be in `docs/_build/html/`.
+
+## Contributing to the code
+
+We welcome contributions to the casanovoutils codebase—especially those addressing existing [issues](https://github.com/Noble-Lab/casanovoutils/issues).
+
+### Setting up a development environment
+
+Clone the repository and install the package with development dependencies using [uv](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/Noble-Lab/casanovoutils.git
+cd casanovoutils
+uv sync --group dev
+```
+
+### Running the tests
+
+```bash
+uv run pytest tests/
+```
+
+### Development workflow
+
+casanovoutils follows a standard GitHub workflow with a few important specifics:
+
+1. Fork the repository
+2. Clone your fork locally
+3. **Create your branch from the `dev` branch** (not `main`):
+   ```bash
+   git checkout dev
+   git checkout -b my_feature_branch
+   ```
+4. Make your changes
+5. Commit and push to your fork
+6. Open a Pull Request (PR) **targeting the `dev` branch**
+
+> [!NOTE]
+> The `main` branch is reserved for stable releases. All active development happens in `dev`.
+
+## Pull request requirements
+
+To keep the project maintainable and reviewer-friendly, all PRs must meet the following criteria.
+
+All pull requests are automatically reviewed by the CodeRabbit AI tool.
+Carefully go through its feedback and address all comments, either by updating your code or by clearly explaining why a suggestion does not apply.
+Ignoring automated review feedback will prevent further review.
+
+In addition, all PRs are automatically linted and tested.
+Your contribution must pass all tests and conform to the expected code style.
+Running `black` and `isort` locally (see below) is strongly recommended to avoid unnecessary iteration.
+
+Only once all automated checks pass and CodeRabbit feedback has been addressed you should request a maintainer review.
+At that point, please tag **@wsnoble**.
+PRs that are not yet ready will not be reviewed.
+
+## Writing good pull requests
+
+**Keep changes focused**
+
+Pull requests should be small, self-contained, and easy to review.
+Avoid combining unrelated changes in a single PR.
+For example, refactoring, feature additions, and bug fixes are best submitted separately.
+If a PR becomes too large or difficult to review, maintainers may ask you to split it into smaller parts.
+
+**Testing expectations**
+
+Contributions should be accompanied by appropriate tests whenever applicable.
+New functionality should be covered by tests, and bug fixes should ideally include a test that reproduces the original issue.
+Contributions must not break existing tests, and should not reduce test coverage.
+Reliable, deterministic tests are preferred.
+
+**Documentation requirements**
+
+Code changes should be understandable and discoverable.
+Public functions and classes must include clear docstrings, and any change in behavior should be reflected in the documentation.
+For more complex logic, brief inline comments can help future contributors understand the intent of the code.
+
+## Python code style
+
+We follow [PEP 8](https://www.python.org/dev/peps/pep-0008/) and use [black](https://black.readthedocs.io/) for formatting and [isort](https://pycqa.github.io/isort/) for import ordering.
+
+Before submitting a pull request, please run:
+
+```bash
+uv run isort src/ tests/
+uv run black src/ tests/
+```
+
+We strongly recommend setting up pre-commit hooks so that formatting issues are caught before committing:
+
+```bash
+pip install black isort pre-commit
+pre-commit install
+```
+
+## Use of AI coding tools
+
+Contributions created with the help of AI coding tools are welcome.
+However:
+
+**You are fully responsible for your contribution.**
+
+This includes ensuring that the code is correct, relevant, and consistent with the rest of the codebase.
+Contributions should not contain unreviewed code or blindly generated output.
+Submissions that do not meet basic quality standards may be rejected.
+
+## Review process and etiquette
+
+Code review is a collaborative process aimed at improving both the contribution and the project as a whole.
+Please be open to feedback and willing to iterate on your work.
+Maintainers may request changes not only for correctness, but also for clarity, consistency, or long-term maintainability.
+
+Similarly, feedback from maintainers is intended to be constructive and supportive.
+Clear communication and responsiveness help ensure that contributions can be merged efficiently.
+
+## What makes a good contribution
+
+Strong contributions are those that clearly address a defined problem, are technically sound, and integrate naturally with the existing codebase.
+They are tested, documented, and thoughtfully implemented.
+Contributors are encouraged to review their own changes before submission and ensure that their PR is ready for review.
+
+---
+
+Thank you again for contributing to casanovoutils!
