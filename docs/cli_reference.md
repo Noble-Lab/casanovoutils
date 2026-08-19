@@ -419,11 +419,11 @@ Create peptide-level train/validation/test splits from annotated MGF files.
 Peptides are split 80 / 10 / 10 by unique sequence to prevent leakage between
 splits.
 
-For each split, the following output files are written:
+The following output files are written:
 
 - `<output_root>.{train,val,test}.mgf` — spectra assigned to each split
 - `<output_root>.{train,val,test}.peptides.txt` — tab-separated modified and bare sequences
-- `<output_root>.log.txt` — run log with spectrum and peptide counts
+- `<output_root>.log.txt` — single run-level log with spectrum and peptide counts
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
