@@ -176,21 +176,20 @@ def convert(
 
     output_file = pathlib.Path(output_file)
     tmp_dir = output_file.parent
-    with (
-        pyteomics.mgf.read(
-            str(input_file), use_index=False, use_header=False
-        ) as reader,
-        tempfile.NamedTemporaryFile(
-            mode="w", dir=tmp_dir, suffix=".mgf", delete=False
-        ) as tmp_fh,
-    ):
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=tmp_dir, suffix=".mgf", delete=False
+    ) as tmp_fh:
         tmp_path = pathlib.Path(tmp_fh.name)
+    # tmp_fh is now closed; write via path so no handle is open during cleanup.
+    with pyteomics.mgf.read(
+        str(input_file), use_index=False, use_header=False
+    ) as reader:
         header = reader.header
         spectra = tqdm.tqdm(reader, desc="Converting spectra", unit="spectrum")
         try:
             pyteomics.mgf.write(
                 (_convert_spectrum(s) for s in spectra),
-                output=tmp_fh,
+                output=str(tmp_path),
                 header=header,
             )
         except Exception:
