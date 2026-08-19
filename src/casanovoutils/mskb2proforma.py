@@ -3,6 +3,7 @@
 import logging
 import pathlib
 import re
+import tempfile
 from os import PathLike
 
 import fire
@@ -173,16 +174,29 @@ def convert(
                 ) from exc
         return {**spectrum, "params": params}
 
-    with pyteomics.mgf.read(
-        str(input_file), use_index=False, use_header=False
-    ) as reader:
+    output_file = pathlib.Path(output_file)
+    tmp_dir = output_file.parent
+    with (
+        pyteomics.mgf.read(
+            str(input_file), use_index=False, use_header=False
+        ) as reader,
+        tempfile.NamedTemporaryFile(
+            mode="w", dir=tmp_dir, suffix=".mgf", delete=False
+        ) as tmp_fh,
+    ):
+        tmp_path = pathlib.Path(tmp_fh.name)
         header = reader.header
         spectra = tqdm.tqdm(reader, desc="Converting spectra", unit="spectrum")
-        pyteomics.mgf.write(
-            (_convert_spectrum(s) for s in spectra),
-            output=str(output_file),
-            header=header,
-        )
+        try:
+            pyteomics.mgf.write(
+                (_convert_spectrum(s) for s in spectra),
+                output=tmp_fh,
+                header=header,
+            )
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    tmp_path.replace(output_file)
 
     logging.info("Converted %d spectra", n_converted)
 

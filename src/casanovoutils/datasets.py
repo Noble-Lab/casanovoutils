@@ -703,7 +703,13 @@ def create_datasets(
                 f"Use --overwrite to overwrite."
             )
 
-    configure_logging(pathlib.Path(f"{output_root}.log.txt"))
+    configure_logging()
+    log_file = pathlib.Path(f"{output_root}.log.txt")
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    )
+    logging.root.addHandler(file_handler)
 
     random.seed(random_seed)
 
