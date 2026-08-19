@@ -3,9 +3,12 @@ import csv
 import numpy as np
 
 from casanovoutils.summarize_mgf import (
+    _extract_cterm_token,
     charge_distribution,
     count_charge_states,
+    count_cterm_aas,
     count_peaks,
+    cterm_aa_distribution,
     fragment_coverage,
     measure_peptide_lengths,
     peak_counts,
@@ -533,3 +536,179 @@ def test_fragment_coverage_workers_match(tmp_path):
     cov1 = {r["scan"]: r["coverage"] for r in rows1}
     cov2 = {r["scan"]: r["coverage"] for r in rows2}
     assert cov1 == cov2
+
+
+# ---------------------------------------------------------------------------
+# _extract_cterm_token tests (pure function)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_cterm_token_bare():
+    """Plain sequence returns the last amino acid."""
+    assert _extract_cterm_token("PEPTIDE") == "E"
+
+
+def test_extract_cterm_token_with_mod():
+    """Last residue with a modification returns the full token."""
+    assert _extract_cterm_token("PEPTK[+229.163]") == "K[+229.163]"
+
+
+def test_extract_cterm_token_named_mod():
+    """Named modification on the last residue is included in the token."""
+    assert _extract_cterm_token("PEPTIC[Carbamidomethyl]") == "C[Carbamidomethyl]"
+
+
+def test_extract_cterm_token_nterm_mod_ignored():
+    """N-terminal modification does not affect C-terminal extraction."""
+    assert _extract_cterm_token("[Acetyl]-PEPTIDER") == "R"
+
+
+def test_extract_cterm_token_cterm_tag_stripped():
+    """ProForma C-terminal sequence tag is stripped; bare residue returned."""
+    assert _extract_cterm_token("PEPTIDE-[Amidated]") == "E"
+
+
+def test_extract_cterm_token_nterm_shift():
+    """Leading mass shift is ignored; correct C-terminal residue returned."""
+    assert (
+        _extract_cterm_token("+229.163AC[Carbamidomethyl]GANHTLVLDSQK[+229.163]")
+        == "K[+229.163]"
+    )
+
+
+def test_extract_cterm_token_empty():
+    """Empty string returns None."""
+    assert _extract_cterm_token("") is None
+
+
+# ---------------------------------------------------------------------------
+# count_cterm_aas tests (pure function)
+# ---------------------------------------------------------------------------
+
+
+def _seq_spectrum(seq):
+    """Build a minimal spectrum dict with only a SEQ= field."""
+    return {
+        "params": {"seq": seq},
+        "m/z array": np.array([]),
+        "intensity array": np.array([]),
+    }
+
+
+def test_count_cterm_aas_basic():
+    """Correct C-terminal tokens are counted at PSM level."""
+    spectra = [
+        _seq_spectrum("PEPTIDK"),
+        _seq_spectrum("GFLAGGK"),
+        _seq_spectrum("PEPTIDR"),
+        _seq_spectrum("PEPTIDK"),
+    ]
+    counts, n_skipped = count_cterm_aas(spectra)
+    assert counts["K"] == 2
+    assert counts["R"] == 1
+    assert n_skipped == 0
+
+
+def test_count_cterm_aas_with_mod():
+    """Residue token including modification is counted separately from bare residue."""
+    spectra = [
+        _seq_spectrum("PEPTIDK[+229.163]"),
+        _seq_spectrum("PEPTIDK"),
+        _seq_spectrum("PEPTIDK[+229.163]"),
+    ]
+    counts, n_skipped = count_cterm_aas(spectra)
+    assert counts["K[+229.163]"] == 2
+    assert counts["K"] == 1
+    assert n_skipped == 0
+
+
+def test_count_cterm_aas_no_seq_skipped():
+    """Spectra without SEQ= are counted as skipped."""
+    spectra = [
+        _seq_spectrum("PEPTIDK"),
+        {"params": {}, "m/z array": np.array([]), "intensity array": np.array([])},
+    ]
+    counts, n_skipped = count_cterm_aas(spectra)
+    assert counts["K"] == 1
+    assert n_skipped == 1
+
+
+def test_count_cterm_aas_il_counted_separately():
+    """I and L at the C-terminus are counted as distinct tokens."""
+    spectra = [
+        _seq_spectrum("PEPTIDI"),
+        _seq_spectrum("PEPTIDL"),
+        _seq_spectrum("PEPTIDL"),
+    ]
+    counts, n_skipped = count_cterm_aas(spectra)
+    assert counts["I"] == 1
+    assert counts["L"] == 2
+    assert n_skipped == 0
+
+
+# ---------------------------------------------------------------------------
+# cterm_aa_distribution integration test
+# ---------------------------------------------------------------------------
+
+SMALL_MGF_CTERM = """\
+BEGIN IONS
+TITLE=spec1
+PEPMASS=500.0
+CHARGE=2+
+SEQ=PEPTIDK
+100.0 10
+END IONS
+
+BEGIN IONS
+TITLE=spec2
+PEPMASS=600.0
+CHARGE=2+
+SEQ=PEPTIDEK[+229.163]
+100.0 10
+END IONS
+
+BEGIN IONS
+TITLE=spec3
+PEPMASS=700.0
+CHARGE=2+
+SEQ=PEPTIDR
+100.0 10
+END IONS
+
+BEGIN IONS
+TITLE=spec4
+PEPMASS=800.0
+CHARGE=2+
+100.0 10
+END IONS
+"""
+
+
+def test_cterm_aa_distribution_integration(tmp_path):
+    """cterm_aa_distribution writes expected TSV (sorted by count) and PNG."""
+    mgf_path = tmp_path / "test.mgf"
+    mgf_path.write_text(SMALL_MGF_CTERM)
+
+    tsv_path = tmp_path / "out.tsv"
+    png_path = tmp_path / "out.png"
+
+    cterm_aa_distribution(str(mgf_path), str(tsv_path), str(png_path))
+
+    with open(tsv_path) as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        rows = list(reader)
+
+    # 3 spectra have SEQ=; 1 is skipped (no SEQ=)
+    assert len(rows) == 3
+    counts = {r["amino_acid"]: int(r["count"]) for r in rows}
+
+    assert counts["K"] == 1
+    assert counts["K[+229.163]"] == 1
+    assert counts["R"] == 1
+
+    # Verify percentage column is present and sums to ~100
+    pcts = [float(r["percentage"]) for r in rows]
+    assert abs(sum(pcts) - 100.0) < 0.1
+
+    assert png_path.exists()
+    assert png_path.stat().st_size > 0

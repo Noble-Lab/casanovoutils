@@ -311,7 +311,8 @@ Generate per-file statistics and visualisations for MGF files.
 ### `summarize`
 
 Produce a self-contained HTML report for an MGF file covering charge
-distribution, peak counts, peptide lengths, and fragment ion coverage.
+distribution, peak counts, peptide lengths, C-terminal amino acid distribution,
+and fragment ion coverage.
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -328,6 +329,28 @@ distribution, peak counts, peptide lengths, and fragment ion coverage.
 ```bash
 casanovoutils summarize_mgf summarize input.mgf --output_root my_report \
   --tolerance 10 --tolerance_unit ppm --workers 4
+```
+
+---
+
+### `count-cterm-aas`
+
+Count C-terminal amino acid residues across annotated spectra (requires `SEQ=`).
+Counts at PSM level (one tally per spectrum, not per unique peptide).  The full
+residue token is reported, so a modified residue such as `K[+229.163]` is
+counted separately from bare `K`.  Spectra without `SEQ=` are skipped.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file (requires `SEQ=` in ProForma notation) |
+| `--output_tsv` | path | `"cterm_aas.tsv"` | Output counts TSV (`amino_acid`, `count`, `percentage`) |
+| `--output_plot` | path | `"cterm_aas.png"` | Output horizontal bar chart |
+
+**Example:**
+
+```bash
+casanovoutils summarize_mgf count-cterm-aas input.mgf \
+  --output_tsv cterm.tsv --output_plot cterm.png
 ```
 
 ---
