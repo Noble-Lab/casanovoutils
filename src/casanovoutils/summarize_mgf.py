@@ -505,13 +505,19 @@ def count_cterm_aas(spectra: Iterable) -> tuple[Counter, int]:
     counts : Counter[str]
         Mapping of C-terminal residue token to PSM count.
     n_skipped : int
-        Number of spectra skipped (missing or unparseable ``SEQ=``).
+        Number of spectra skipped (missing ``SEQ=``, invalid ProForma, or
+        unrecognisable C-terminal token).
     """
     counts: Counter[str] = Counter()
     n_skipped = 0
     for spectrum in spectra:
         seq = spectrum["params"].get("seq", "")
         if not seq:
+            n_skipped += 1
+            continue
+        try:
+            pyteomics_proforma.parse(seq)
+        except Exception:
             n_skipped += 1
             continue
         token = _extract_cterm_token(seq)
@@ -550,8 +556,8 @@ def cterm_aa_distribution(
     print(f"Processed {total + n_skipped} spectra total.", file=sys.stderr)
     if n_skipped:
         print(
-            f"  Warning: {n_skipped} spectra without SEQ= or with unparseable"
-            " sequences were skipped.",
+            f"  Warning: {n_skipped} spectra without SEQ= or with invalid"
+            " ProForma sequences were skipped.",
             file=sys.stderr,
         )
 
@@ -1245,11 +1251,6 @@ def summarize_mgf(
 
                     n_with_seq += 1
 
-                    # C-terminal residue token (lightweight, no parse needed)
-                    cterm_token = _extract_cterm_token(seq)
-                    if cterm_token is not None:
-                        cterm_counts[cterm_token] += 1
-
                     try:
                         parsed_seq, props = pyteomics_proforma.parse(seq)
                         length_counts[len(parsed_seq)] += 1
@@ -1260,6 +1261,10 @@ def summarize_mgf(
                             mod_counts[("N-term", str(mod))] += 1
                         for mod in props.get("c_term") or []:
                             mod_counts[("C-term", str(mod))] += 1
+                        # C-terminal residue token (only for valid ProForma seqs)
+                        cterm_token = _extract_cterm_token(seq)
+                        if cterm_token is not None:
+                            cterm_counts[cterm_token] += 1
                     except Exception:
                         n_parse_errors += 1
 

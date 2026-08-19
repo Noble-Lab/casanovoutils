@@ -633,6 +633,17 @@ def test_count_cterm_aas_no_seq_skipped():
     assert n_skipped == 1
 
 
+def test_count_cterm_aas_invalid_proforma_skipped():
+    """Spectra with invalid ProForma sequences are skipped, not counted."""
+    spectra = [
+        _seq_spectrum("PEPTIDK"),
+        _seq_spectrum("NOT[VALID[PROFORMA"),  # unclosed bracket — invalid ProForma
+    ]
+    counts, n_skipped = count_cterm_aas(spectra)
+    assert counts["K"] == 1
+    assert n_skipped == 1
+
+
 def test_count_cterm_aas_il_counted_separately():
     """I and L at the C-terminus are counted as distinct tokens."""
     spectra = [
