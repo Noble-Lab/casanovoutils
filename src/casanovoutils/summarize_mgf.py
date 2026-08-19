@@ -99,7 +99,7 @@ def _make_cterm_bar_fig(counts: Counter) -> plt.Figure:
     total = sum(counts.values())
     tokens = sorted(counts, key=lambda t: -counts[t])
     vals = [counts[t] for t in tokens]
-    fig, ax = plt.subplots(figsize=(7, max(3, 0.4 * len(tokens))))
+    fig, ax = plt.subplots(figsize=(7, min(max(3, 0.4 * len(tokens)), 12)))
     ax.barh(tokens[::-1], vals[::-1], edgecolor="black", linewidth=0.5)
     ax.set_xlabel("Number of PSMs")
     ax.set_ylabel("C-terminal residue")
