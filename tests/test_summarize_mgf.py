@@ -599,13 +599,13 @@ def test_count_cterm_aas_basic():
     """Correct C-terminal tokens are counted at PSM level."""
     spectra = [
         _seq_spectrum("PEPTIDK"),
-        _seq_spectrum("GFLAGGK"),
+        _seq_spectrum("GFLAGGR"),
         _seq_spectrum("PEPTIDR"),
         _seq_spectrum("PEPTIDK"),
     ]
     counts, n_skipped = count_cterm_aas(spectra)
     assert counts["K"] == 2
-    assert counts["R"] == 1
+    assert counts["R"] == 2
     assert n_skipped == 0
 
 
