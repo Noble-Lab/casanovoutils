@@ -196,7 +196,11 @@ def convert(
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
-    tmp_path.replace(output_file)
+    try:
+        tmp_path.replace(output_file)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
     logging.info("Converted %d spectra", n_converted)
 

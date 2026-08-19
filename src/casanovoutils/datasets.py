@@ -705,62 +705,72 @@ def create_datasets(
 
     configure_logging()
     log_file = pathlib.Path(f"{output_root}.log.txt")
-    file_handler = logging.FileHandler(log_file)
+    # Use mode="w" so log.txt is always a single-run artifact, consistent with
+    # overwrite semantics for the MGF and peptides.txt outputs.
+    file_handler = logging.FileHandler(log_file, mode="w")
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     )
     logging.root.addHandler(file_handler)
 
-    random.seed(random_seed)
+    try:
+        random.seed(random_seed)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if mskb_format:
-            tmp = pathlib.Path(tmpdir)
-            converted = []
-            for i, src in enumerate(mgf_files):
-                src = pathlib.Path(src)
-                dst = tmp / f"converted_{i}_{src.name}"
-                logging.info(f"Converting {src} from MassIVE-KB format to ProForma...")
-                _mskb2proforma_convert(src, dst)
-                converted.append(dst)
-            mgf_files = tuple(converted)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if mskb_format:
+                tmp = pathlib.Path(tmpdir)
+                converted = []
+                for i, src in enumerate(mgf_files):
+                    src = pathlib.Path(src)
+                    dst = tmp / f"converted_{i}_{src.name}"
+                    logging.info(
+                        f"Converting {src} from MassIVE-KB format to ProForma..."
+                    )
+                    _mskb2proforma_convert(src, dst)
+                    converted.append(dst)
+                mgf_files = tuple(converted)
 
-        pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(mgf_files)
-
-        pep_to_split, sampled_indices, existing_peps = _assign_splits(
-            pep_counts,
-            sampling_counts,
-            total_spectra,
-            existing_splits,
-            spectra_per_precursor,
-        )
-
-        split_spectra_counts, split_pep_sets, mod_to_bare_by_split = _write_splits(
-            mgf_files,
-            output_root,
-            pep_to_split,
-            sampled_indices,
-            spectra_per_precursor,
-            existing_splits,
-            combine_with_existing,
-        )
-
-    # Log split summaries.
-    for split_name in ("train", "val", "test"):
-        peps = split_pep_sets[split_name]
-        count = split_spectra_counts[split_name]
-        if combine_with_existing:
-            new_pep_count = len(peps - existing_peps[split_name])
-            total_peps = len(peps | existing_peps[split_name])
-            logging.info(
-                f"{split_name}: {count} spectra, "
-                f"{new_pep_count} new peptides, "
-                f"{total_peps} total peptides"
+            pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(
+                mgf_files
             )
-        else:
-            logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
 
-    _write_peptides_txt(output_root, mod_to_bare_by_split)
+            pep_to_split, sampled_indices, existing_peps = _assign_splits(
+                pep_counts,
+                sampling_counts,
+                total_spectra,
+                existing_splits,
+                spectra_per_precursor,
+            )
+
+            split_spectra_counts, split_pep_sets, mod_to_bare_by_split = _write_splits(
+                mgf_files,
+                output_root,
+                pep_to_split,
+                sampled_indices,
+                spectra_per_precursor,
+                existing_splits,
+                combine_with_existing,
+            )
+
+        # Log split summaries.
+        for split_name in ("train", "val", "test"):
+            peps = split_pep_sets[split_name]
+            count = split_spectra_counts[split_name]
+            if combine_with_existing:
+                new_pep_count = len(peps - existing_peps[split_name])
+                total_peps = len(peps | existing_peps[split_name])
+                logging.info(
+                    f"{split_name}: {count} spectra, "
+                    f"{new_pep_count} new peptides, "
+                    f"{total_peps} total peptides"
+                )
+            else:
+                logging.info(f"{split_name}: {count} spectra, {len(peps)} peptides")
+
+        _write_peptides_txt(output_root, mod_to_bare_by_split)
+    finally:
+        logging.root.removeHandler(file_handler)
+        file_handler.close()
 
 
 COMMANDS: Commands = create_datasets
