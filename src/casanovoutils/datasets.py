@@ -663,43 +663,44 @@ def _filter_mgf_files(
     for i, src in enumerate(mgf_files):
         src = pathlib.Path(src)
         dst = tmpdir / f"filtered_{i}_{src.name}"
-        spectra_out = []
 
-        for spectrum in tqdm.tqdm(
-            pyteomics.mgf.read(str(src), use_index=False),
-            desc=f"Filtering {src.name}",
-            unit="psm",
-        ):
-            n_total += 1
+        def _passing(path):
+            nonlocal n_total, n_no_seq, n_bad_seq, n_bad_charge, n_few_peaks
+            for spectrum in tqdm.tqdm(
+                pyteomics.mgf.read(str(path), use_index=False),
+                desc=f"Filtering {path.name}",
+                unit="psm",
+            ):
+                n_total += 1
 
-            seq = spectrum["params"].get("seq", "")
-            if not seq:
-                n_no_seq += 1
-                continue
+                seq = spectrum["params"].get("seq", "")
+                if not seq:
+                    n_no_seq += 1
+                    continue
 
-            try:
-                tokens = _seq_to_tokens(seq)
-            except Exception:  # noqa: BLE001
-                n_bad_seq += 1
-                continue
-            if replace_il:
-                tokens = [t.replace("I", "L") for t in tokens]
-            if any(t not in valid_tokens for t in tokens):
-                n_bad_seq += 1
-                continue
+                try:
+                    tokens = _seq_to_tokens(seq)
+                except Exception:  # noqa: BLE001
+                    n_bad_seq += 1
+                    continue
+                if replace_il:
+                    tokens = ["L" + t[1:] if t[0] == "I" else t for t in tokens]
+                if any(t not in valid_tokens for t in tokens):
+                    n_bad_seq += 1
+                    continue
 
-            charge = _parse_charge(spectrum["params"].get("charge"))
-            if charge is None or charge <= 0 or charge > max_charge:
-                n_bad_charge += 1
-                continue
+                charge = _parse_charge(spectrum["params"].get("charge"))
+                if charge is None or charge <= 0 or charge > max_charge:
+                    n_bad_charge += 1
+                    continue
 
-            if len(spectrum.get("m/z array", [])) < min_peaks:
-                n_few_peaks += 1
-                continue
+                if len(spectrum.get("m/z array", [])) < min_peaks:
+                    n_few_peaks += 1
+                    continue
 
-            spectra_out.append(spectrum)
+                yield spectrum
 
-        pyteomics.mgf.write(spectra_out, output=str(dst))
+        pyteomics.mgf.write(_passing(src), output=str(dst))
         filtered.append(dst)
 
     n_pass = n_total - n_no_seq - n_bad_seq - n_bad_charge - n_few_peaks

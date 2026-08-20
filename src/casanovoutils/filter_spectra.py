@@ -226,7 +226,7 @@ def filter_spectra(
             # When replace_isoleucine_with_leucine is set, canonicalize I→L
             # in tokens before vocabulary lookup, matching Casanovo's behavior.
             if replace_il:
-                tokens = [t.replace("I", "L") for t in tokens]
+                tokens = ["L" + t[1:] if t[0] == "I" else t for t in tokens]
             if any(t not in valid_tokens for t in tokens):
                 n_bad_seq += 1
                 continue
