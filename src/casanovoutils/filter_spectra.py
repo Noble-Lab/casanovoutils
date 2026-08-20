@@ -16,7 +16,7 @@ Outputs a filtered MGF and a log file with per-criterion counts.
 import logging
 import pathlib
 from os import PathLike
-from typing import Optional
+from typing import Generator, Optional
 
 import pyteomics.mgf
 import tqdm
@@ -24,7 +24,7 @@ import yaml
 from pyteomics import proforma as pf
 
 from . import configure_logging
-from .types import Commands, PyteomicsSpectrum
+from .types import PyteomicsSpectrum
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,11 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_config(config_path: PathLike) -> dict:
     """Load a Casanovo YAML config and return it as a dict."""
     with open(config_path) as fh:
-        return yaml.safe_load(fh)
+        return yaml.safe_load(fh) or {}
 
 
 def _seq_to_tokens(seq: str) -> list[str]:
@@ -48,8 +49,7 @@ def _seq_to_tokens(seq: str) -> list[str]:
     ``[Acetyl]-``; mass modifications produce tokens like
     ``K[+229.163000]`` and ``[+271.174000]-``.
 
-    Returns a list of token strings, or raises ``ValueError`` if the
-    ProForma string cannot be parsed.
+    Raises an exception if the ProForma string cannot be parsed.
     """
     residues, meta = pf.parse(seq)
 
@@ -105,11 +105,13 @@ def _parse_charge(charge_raw) -> Optional[int]:
 # Core command
 # ---------------------------------------------------------------------------
 
+
 def filter_spectra(
     mgf_file: PathLike,
     config: PathLike,
     output_root: str = "filtered",
     output_dir: PathLike = ".",
+    overwrite: bool = False,
 ) -> None:
     """
     Filter an annotated MGF file using Casanovo's spectrum acceptance criteria.
@@ -131,6 +133,9 @@ def filter_spectra(
         Stem used for output file names (default ``"filtered"``).
     output_dir : PathLike, optional
         Directory in which to write output files (default: current directory).
+    overwrite : bool, optional
+        If False (default), raise ``FileExistsError`` if any output file
+        already exists.
     """
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +143,27 @@ def filter_spectra(
     mgf_out = output_dir / f"{output_root}.mgf"
     log_out = output_dir / f"{output_root}.log"
 
+    if not overwrite:
+        existing = [p for p in (mgf_out, log_out) if p.exists()]
+        if existing:
+            paths = ", ".join(str(p) for p in existing)
+            raise FileExistsError(
+                f"Output file(s) already exist: {paths}. "
+                f"Use --overwrite to overwrite."
+            )
+
+    # Always attach a file handler for log_out, even if root handlers exist
+    # from a prior configure_logging call.
     configure_logging(log_out)
+    file_handler = logging.FileHandler(log_out)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    )
+    if not any(
+        isinstance(h, logging.FileHandler) and h.baseFilename == str(log_out.resolve())
+        for h in logging.root.handlers
+    ):
+        logging.root.addHandler(file_handler)
 
     cfg = _load_config(config)
     min_peaks: int = cfg.get("min_peaks", 20)
@@ -151,7 +176,9 @@ def filter_spectra(
     _STANDARD_AAS = set("ACDEFGHIKLMNPQRSTVWY")
     residues: dict = cfg.get("residues", {})
     valid_tokens: set[str] = _STANDARD_AAS | set(residues.keys())
-    if replace_il and "I" in valid_tokens:
+    # When I→L replacement is active, I is not a valid token; sequences
+    # containing I are canonicalized to L before vocabulary lookup.
+    if replace_il:
         valid_tokens.discard("I")
 
     logger.info("Input MGF  : %s", mgf_file)
@@ -165,48 +192,58 @@ def filter_spectra(
     n_bad_seq = 0
     n_bad_charge = 0
     n_few_peaks = 0
+    n_pass = 0
 
-    passing: list[PyteomicsSpectrum] = []
+    def _filtered_spectra() -> Generator[PyteomicsSpectrum, None, None]:
+        nonlocal n_total, n_no_seq, n_bad_seq, n_bad_charge, n_few_peaks, n_pass
 
-    for spectrum in tqdm.tqdm(
-        pyteomics.mgf.read(str(mgf_file), use_index=False),
-        desc=f"Filtering {mgf_file}",
-        unit="psm",
-    ):
-        n_total += 1
+        for spectrum in tqdm.tqdm(
+            pyteomics.mgf.read(str(mgf_file), use_index=False),
+            desc=f"Filtering {mgf_file}",
+            unit="psm",
+        ):
+            n_total += 1
 
-        # --- 1. Missing or empty SEQ ----------------------------------------
-        seq = spectrum["params"].get("seq", "")
-        if not seq:
-            n_no_seq += 1
-            continue
+            # --- 1. Missing or empty SEQ ------------------------------------
+            seq = spectrum["params"].get("seq", "")
+            if not seq:
+                n_no_seq += 1
+                continue
 
-        # --- 2. Unknown tokens in sequence ----------------------------------
-        try:
-            tokens = _seq_to_tokens(seq)
-        except Exception:
-            n_bad_seq += 1
-            continue
-        if any(t not in valid_tokens for t in tokens):
-            n_bad_seq += 1
-            continue
+            # --- 2. Unknown tokens in sequence ------------------------------
+            try:
+                tokens = _seq_to_tokens(seq)
+            except Exception:  # noqa: BLE001 — pyteomics raises heterogeneous types
+                n_bad_seq += 1
+                continue
+            # When replace_isoleucine_with_leucine is set, canonicalize I→L
+            # in tokens before vocabulary lookup, matching Casanovo's behavior.
+            if replace_il:
+                tokens = [t.replace("I", "L") for t in tokens]
+            if any(t not in valid_tokens for t in tokens):
+                n_bad_seq += 1
+                continue
 
-        # --- 3. Invalid charge ----------------------------------------------
-        charge = _parse_charge(spectrum["params"].get("charge"))
-        if charge is None or charge <= 0 or charge > max_charge:
-            n_bad_charge += 1
-            continue
+            # --- 3. Invalid charge ------------------------------------------
+            charge = _parse_charge(spectrum["params"].get("charge"))
+            if charge is None or charge <= 0 or charge > max_charge:
+                n_bad_charge += 1
+                continue
 
-        # --- 4. Too few peaks -----------------------------------------------
-        if len(spectrum.get("m/z array", [])) < min_peaks:
-            n_few_peaks += 1
-            continue
+            # --- 4. Too few peaks -------------------------------------------
+            if len(spectrum.get("m/z array", [])) < min_peaks:
+                n_few_peaks += 1
+                continue
 
-        passing.append(spectrum)
+            n_pass += 1
+            yield spectrum
 
-    n_pass = len(passing)
+    pyteomics.mgf.write(
+        tqdm.tqdm(_filtered_spectra(), desc=f"Writing {mgf_out}", unit="psm"),
+        output=str(mgf_out),
+    )
+
     n_filtered = n_total - n_pass
-
     logger.info("---")
     logger.info("Total spectra read        : %d", n_total)
     logger.info("Filtered: missing SEQ     : %d", n_no_seq)
@@ -215,11 +252,6 @@ def filter_spectra(
     logger.info("Filtered: too few peaks   : %d", n_few_peaks)
     logger.info("Filtered: total           : %d", n_filtered)
     logger.info("Passing spectra written   : %d", n_pass)
-
-    pyteomics.mgf.write(
-        tqdm.tqdm(passing, desc=f"Writing {mgf_out}", unit="psm"),
-        output=str(mgf_out),
-    )
 
 
 COMMANDS = filter_spectra
