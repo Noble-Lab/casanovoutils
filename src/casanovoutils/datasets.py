@@ -13,6 +13,7 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
+from .filter_spectra import _load_config, _parse_charge, _seq_to_tokens
 from .mskb2proforma import convert as _mskb2proforma_convert
 from .types import Commands
 
@@ -622,6 +623,97 @@ def _write_splits(
     return split_spectra_counts, split_pep_sets, mod_to_bare_by_split
 
 
+def _filter_mgf_files(
+    mgf_files: tuple[PathLike, ...],
+    casanovo_config: PathLike,
+    tmpdir: pathlib.Path,
+) -> tuple[PathLike, ...]:
+    """Filter MGF files using a Casanovo config, writing results to *tmpdir*.
+
+    For each input file, spectra that fail any of the following checks are
+    removed:
+
+    * Missing or empty ``SEQ`` field.
+    * Sequence contains tokens absent from the Casanovo residue vocabulary.
+    * Precursor charge is missing, ambiguous, zero, or exceeds ``max_charge``.
+    * Fewer than ``min_peaks`` peaks.
+
+    Per-criterion counts are written to the log. Returns a tuple of paths to
+    the filtered MGF files in the same order as *mgf_files*.
+    """
+    cfg = _load_config(casanovo_config)
+    min_peaks: int = cfg.get("min_peaks", 20)
+    max_charge: int = cfg.get("max_charge", 10)
+    replace_il: bool = cfg.get("replace_isoleucine_with_leucine", False)
+
+    _STANDARD_AAS = set("ACDEFGHIKLMNPQRSTVWY")
+    residues: dict = cfg.get("residues", {})
+    valid_tokens: set[str] = _STANDARD_AAS | set(residues.keys())
+    if replace_il:
+        valid_tokens.discard("I")
+
+    logging.info(
+        f"Filtering with Casanovo config: {casanovo_config} "
+        f"(min_peaks={min_peaks}, max_charge={max_charge})"
+    )
+
+    n_total = n_no_seq = n_bad_seq = n_bad_charge = n_few_peaks = 0
+
+    filtered: list[PathLike] = []
+    for i, src in enumerate(mgf_files):
+        src = pathlib.Path(src)
+        dst = tmpdir / f"filtered_{i}_{src.name}"
+        spectra_out = []
+
+        for spectrum in tqdm.tqdm(
+            pyteomics.mgf.read(str(src), use_index=False),
+            desc=f"Filtering {src.name}",
+            unit="psm",
+        ):
+            n_total += 1
+
+            seq = spectrum["params"].get("seq", "")
+            if not seq:
+                n_no_seq += 1
+                continue
+
+            try:
+                tokens = _seq_to_tokens(seq)
+            except Exception:  # noqa: BLE001
+                n_bad_seq += 1
+                continue
+            if replace_il:
+                tokens = [t.replace("I", "L") for t in tokens]
+            if any(t not in valid_tokens for t in tokens):
+                n_bad_seq += 1
+                continue
+
+            charge = _parse_charge(spectrum["params"].get("charge"))
+            if charge is None or charge <= 0 or charge > max_charge:
+                n_bad_charge += 1
+                continue
+
+            if len(spectrum.get("m/z array", [])) < min_peaks:
+                n_few_peaks += 1
+                continue
+
+            spectra_out.append(spectrum)
+
+        pyteomics.mgf.write(spectra_out, output=str(dst))
+        filtered.append(dst)
+
+    n_pass = n_total - n_no_seq - n_bad_seq - n_bad_charge - n_few_peaks
+    logging.info(f"Filtering complete — total spectra read : {n_total}")
+    logging.info(f"  Filtered: missing SEQ     : {n_no_seq}")
+    logging.info(f"  Filtered: invalid tokens  : {n_bad_seq}")
+    logging.info(f"  Filtered: invalid charge  : {n_bad_charge}")
+    logging.info(f"  Filtered: too few peaks   : {n_few_peaks}")
+    logging.info(f"  Filtered: total           : {n_total - n_pass}")
+    logging.info(f"  Passing spectra           : {n_pass}")
+
+    return tuple(filtered)
+
+
 def create_datasets(
     *mgf_files: PathLike,
     output_root: str,
@@ -631,6 +723,7 @@ def create_datasets(
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]] = None,
     combine_with_existing: bool = False,
     mskb_format: bool = False,
+    casanovo_config: Optional[PathLike] = None,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
@@ -698,6 +791,15 @@ def create_datasets(
         files will contain the converted ProForma sequences, not the original
         MassIVE-KB strings. Conversion raises a ``ValueError`` if any
         sequence cannot be converted.
+    casanovo_config : PathLike, optional
+        Path to a Casanovo YAML configuration file. If provided, spectra are
+        filtered before splitting using the vocabulary and thresholds in the
+        config (``residues``, ``min_peaks``, ``max_charge``, and
+        ``replace_isoleucine_with_leucine``). Spectra with a missing or empty
+        SEQ field, tokens outside the vocabulary, an invalid or out-of-range
+        charge, or fewer than ``min_peaks`` peaks are removed. Filtering is
+        applied after any MassIVE-KB conversion. Per-criterion counts are
+        written to the log file.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
@@ -739,8 +841,8 @@ def create_datasets(
         random.seed(random_seed)
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = pathlib.Path(tmpdir)
             if mskb_format:
-                tmp = pathlib.Path(tmpdir)
                 converted = []
                 for i, src in enumerate(mgf_files):
                     src = pathlib.Path(src)
@@ -751,6 +853,9 @@ def create_datasets(
                     _mskb2proforma_convert(src, dst)
                     converted.append(dst)
                 mgf_files = tuple(converted)
+
+            if casanovo_config is not None:
+                mgf_files = _filter_mgf_files(mgf_files, casanovo_config, tmp)
 
             pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(
                 mgf_files
