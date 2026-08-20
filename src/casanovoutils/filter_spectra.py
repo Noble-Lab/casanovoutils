@@ -37,7 +37,14 @@ logger = logging.getLogger(__name__)
 def _load_config(config_path: PathLike) -> dict:
     """Load a Casanovo YAML config and return it as a dict."""
     with open(config_path) as fh:
-        return yaml.safe_load(fh) or {}
+        cfg = yaml.safe_load(fh)
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict):
+        raise ValueError(
+            f"Expected a YAML mapping in {config_path!r}, got {type(cfg).__name__}."
+        )
+    return cfg
 
 
 def _seq_to_tokens(seq: str) -> list[str]:
@@ -155,14 +162,14 @@ def filter_spectra(
     # Always attach a file handler for log_out, even if root handlers exist
     # from a prior configure_logging call.
     configure_logging(log_out)
-    file_handler = logging.FileHandler(log_out)
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-    )
     if not any(
         isinstance(h, logging.FileHandler) and h.baseFilename == str(log_out.resolve())
         for h in logging.root.handlers
     ):
+        file_handler = logging.FileHandler(log_out)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+        )
         logging.root.addHandler(file_handler)
 
     cfg = _load_config(config)
