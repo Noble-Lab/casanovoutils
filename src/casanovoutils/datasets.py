@@ -725,6 +725,7 @@ def create_datasets(
     combine_with_existing: bool = False,
     mskb_format: bool = False,
     casanovo_config: Optional[PathLike] = None,
+    tmp_dir: Optional[PathLike] = None,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
@@ -801,6 +802,11 @@ def create_datasets(
         charge, or fewer than ``min_peaks`` peaks are removed. Filtering is
         applied after any MassIVE-KB conversion. Per-criterion counts are
         written to the log file.
+    tmp_dir : PathLike, optional
+        Directory to use for temporary files (converted and filtered MGFs).
+        Defaults to the system temporary directory (usually ``/tmp``). Set
+        this to a directory on a volume with sufficient free space when
+        processing large MGF files.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
@@ -841,7 +847,7 @@ def create_datasets(
     try:
         random.seed(random_seed)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(dir=tmp_dir) as tmpdir:
             tmp = pathlib.Path(tmpdir)
             if mskb_format:
                 converted = []
