@@ -13,7 +13,7 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
-from .filter_spectra import _load_config, _parse_charge, _seq_to_tokens
+from .filter_spectra import _load_config, _make_tokenizer, _parse_charge
 from .mskb2proforma import convert as _mskb2proforma_convert
 from .types import Commands
 
@@ -644,13 +644,7 @@ def _filter_mgf_files(
     cfg = _load_config(casanovo_config)
     min_peaks: int = cfg.get("min_peaks", 20)
     max_charge: int = cfg.get("max_charge", 10)
-    replace_il: bool = cfg.get("replace_isoleucine_with_leucine", False)
-
-    _STANDARD_AAS = set("ACDEFGHIKLMNPQRSTVWY")
-    residues: dict = cfg.get("residues", {})
-    valid_tokens: set[str] = _STANDARD_AAS | set(residues.keys())
-    if replace_il:
-        valid_tokens.discard("I")
+    tokenizer = _make_tokenizer(cfg)
 
     logging.info(
         f"Filtering with Casanovo config: {casanovo_config} "
@@ -679,13 +673,8 @@ def _filter_mgf_files(
                     continue
 
                 try:
-                    tokens = _seq_to_tokens(seq)
-                except Exception:  # noqa: BLE001
-                    n_bad_seq += 1
-                    continue
-                if replace_il:
-                    tokens = ["L" + t[1:] if t[0] == "I" else t for t in tokens]
-                if any(t not in valid_tokens for t in tokens):
+                    tokenizer.tokenize(seq)
+                except ValueError:
                     n_bad_seq += 1
                     continue
 

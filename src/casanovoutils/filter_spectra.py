@@ -21,7 +21,7 @@ from typing import Generator, Optional
 import pyteomics.mgf
 import tqdm
 import yaml
-from pyteomics import proforma as pf
+from depthcharge.tokenizers import PeptideTokenizer
 
 from . import configure_logging
 from .types import PyteomicsSpectrum
@@ -47,50 +47,14 @@ def _load_config(config_path: PathLike) -> dict:
     return cfg
 
 
-def _seq_to_tokens(seq: str) -> list[str]:
-    """
-    Split a ProForma sequence into tokens using the same format as
-    depthcharge's ``PeptideTokenizer.split()``.
-
-    Named modifications produce tokens like ``C[Carbamidomethyl]`` and
-    ``[Acetyl]-``; mass modifications produce tokens like
-    ``K[+229.163000]`` and ``[+271.174000]-``.
-
-    Raises an exception if the ProForma string cannot be parsed.
-    """
-    residues, meta = pf.parse(seq)
-
-    def _mod_str(mods: list) -> str:
-        """Format a list of pyteomics modification objects as ``[...]``."""
-        if len(mods) == 1:
-            try:
-                return f"[{mods[0].name}]"
-            except (AttributeError, ValueError):
-                return f"[{mods[0].mass:+0.6f}]"
-        # Multiple mods: sum masses.
-        total = sum(m.mass for m in mods)
-        return f"[{total:+0.6f}]"
-
-    tokens: list[str] = []
-
-    # N-terminal modification.
-    n_term = meta.get("n_term")
-    if n_term:
-        tokens.append(f"{_mod_str(n_term)}-")
-
-    # Residues.
-    for aa, mods in residues:
-        if mods:
-            tokens.append(f"{aa}{_mod_str(mods)}")
-        else:
-            tokens.append(aa)
-
-    # C-terminal modification.
-    c_term = meta.get("c_term")
-    if c_term:
-        tokens.append(f"-{_mod_str(c_term)}")
-
-    return tokens
+def _make_tokenizer(cfg: dict) -> PeptideTokenizer:
+    """Build a PeptideTokenizer from the residues in a Casanovo config."""
+    return PeptideTokenizer(
+        residues=cfg.get("residues", {}),
+        replace_isoleucine_with_leucine=cfg.get(
+            "replace_isoleucine_with_leucine", False
+        ),
+    )
 
 
 def _parse_charge(charge_raw) -> Optional[int]:
@@ -175,18 +139,7 @@ def filter_spectra(
     cfg = _load_config(config)
     min_peaks: int = cfg.get("min_peaks", 20)
     max_charge: int = cfg.get("max_charge", 10)
-    replace_il: bool = cfg.get("replace_isoleucine_with_leucine", False)
-
-    # Build the valid-token set from the config residues, mirroring
-    # PeptideTokenizer: always include the 20 standard amino acids, then
-    # add (or override with) whatever is in the config.
-    _STANDARD_AAS = set("ACDEFGHIKLMNPQRSTVWY")
-    residues: dict = cfg.get("residues", {})
-    valid_tokens: set[str] = _STANDARD_AAS | set(residues.keys())
-    # When I→L replacement is active, I is not a valid token; sequences
-    # containing I are canonicalized to L before vocabulary lookup.
-    if replace_il:
-        valid_tokens.discard("I")
+    tokenizer = _make_tokenizer(cfg)
 
     logger.info("Input MGF  : %s", mgf_file)
     logger.info("Config     : %s", config)
@@ -219,15 +172,8 @@ def filter_spectra(
 
             # --- 2. Unknown tokens in sequence ------------------------------
             try:
-                tokens = _seq_to_tokens(seq)
-            except Exception:  # noqa: BLE001 — pyteomics raises heterogeneous types
-                n_bad_seq += 1
-                continue
-            # When replace_isoleucine_with_leucine is set, canonicalize I→L
-            # in tokens before vocabulary lookup, matching Casanovo's behavior.
-            if replace_il:
-                tokens = ["L" + t[1:] if t[0] == "I" else t for t in tokens]
-            if any(t not in valid_tokens for t in tokens):
+                tokenizer.tokenize(seq)
+            except ValueError:
                 n_bad_seq += 1
                 continue
 
