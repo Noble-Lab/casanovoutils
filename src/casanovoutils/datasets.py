@@ -477,7 +477,9 @@ def _write_splits(
     sampled_indices : dict[tuple, set[int]]
         Per-(peptide, charge) sets of 0-based spectrum indices to retain.
     spectra_per_precursor : int or None
-        Maximum spectra per (peptide, charge) (used to check sampled_indices).
+        Maximum spectra per (peptide, charge) combination.  Used to decide
+        whether to consult *sampled_indices* for a given precursor.  If
+        ``None``, all spectra are retained (no cap applied).
     existing_splits : tuple of PathLike or None
         Paths to existing split files, required when combine_with_existing.
     combine_with_existing : bool
@@ -703,15 +705,12 @@ def create_datasets(
                 f"Use --overwrite to overwrite."
             )
 
-    configure_logging()
-    log_file = pathlib.Path(f"{output_root}.log.txt")
-    # Use mode="w" so log.txt is always a single-run artifact, consistent with
-    # overwrite semantics for the MGF and peptides.txt outputs.
-    file_handler = logging.FileHandler(log_file, mode="w")
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    # Use file_mode="w" so log.txt is always a single-run artifact, consistent
+    # with overwrite semantics for the MGF and peptides.txt outputs.
+    file_handler = configure_logging(
+        pathlib.Path(f"{output_root}.log.txt"),
+        file_mode="w",
     )
-    logging.root.addHandler(file_handler)
 
     try:
         random.seed(random_seed)
