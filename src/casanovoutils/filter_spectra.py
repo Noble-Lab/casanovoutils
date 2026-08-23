@@ -123,18 +123,7 @@ def filter_spectra(
                 f"Use --overwrite to overwrite."
             )
 
-    # Always attach a file handler for log_out, even if root handlers exist
-    # from a prior configure_logging call.
     configure_logging(log_out)
-    if not any(
-        isinstance(h, logging.FileHandler) and h.baseFilename == str(log_out.resolve())
-        for h in logging.root.handlers
-    ):
-        file_handler = logging.FileHandler(log_out)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-        )
-        logging.root.addHandler(file_handler)
 
     cfg = _load_config(config)
     min_peaks: int = cfg.get("min_peaks", 20)
