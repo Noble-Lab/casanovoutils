@@ -70,17 +70,17 @@ class Constants:
         Raises
         ------
         ValueError
-            If neither ``"mztab_opt_global_aa_scores"`` nor
-            ``"mztab_opt_ms_run[1]_aa_scores"`` is found in *df*.
+            If neither :attr:`aa_scores_column` nor
+            :attr:`aa_scores_column_legacy` is found in *df*.
         """
-        if "mztab_opt_global_aa_scores" in df.columns:
-            return "mztab_opt_global_aa_scores"
-        if "mztab_opt_ms_run[1]_aa_scores" in df.columns:
-            return "mztab_opt_ms_run[1]_aa_scores"
+        if Constants.aa_scores_column in df.columns:
+            return Constants.aa_scores_column
+        if Constants.aa_scores_column_legacy in df.columns:
+            return Constants.aa_scores_column_legacy
         raise ValueError(
             "Cannot find per-amino-acid scores column in DataFrame. "
-            "Expected 'mztab_opt_global_aa_scores' (mzTab spec opt_global_* name, "
-            "current pyteomics) or 'mztab_opt_ms_run[1]_aa_scores' "
+            f"Expected '{Constants.aa_scores_column}' (mzTab spec opt_global_* name, "
+            f"current pyteomics) or '{Constants.aa_scores_column_legacy}' "
             "(legacy opt_ms_run[1]_* expansion from older pyteomics). "
             f"Found columns: {df.columns}"
         )
