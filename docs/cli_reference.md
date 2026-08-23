@@ -450,9 +450,9 @@ The following output files are written:
 | `--spectra_per_precursor` | int | `None` | Cap spectra per (peptide, charge state) precursor from new input files |
 | `--random_seed` | int | `42` | Random seed for reproducibility |
 | `--overwrite` | bool | `False` | Overwrite existing output files |
-| `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
+| `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend; must use ProForma sequence notation (MassIVE-KB notation raises a `ValueError`) |
 | `--combine_with_existing` | bool | `False` | Include existing spectra in output alongside new ones |
-| `--mskb_format` | bool | `False` | Convert input sequences from MassIVE-KB PTM notation to ProForma before splitting |
+| `--mskb_format` | bool | `False` | Convert new `mgf_files` from MassIVE-KB PTM notation to ProForma before splitting; does not apply to `--existing_splits` |
 
 **Examples:**
 
