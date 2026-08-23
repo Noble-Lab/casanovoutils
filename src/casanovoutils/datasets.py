@@ -13,7 +13,7 @@ import pyteomics.mgf
 import tqdm
 
 from . import configure_logging
-from .filter_spectra import _load_config, _make_tokenizer, _parse_charge
+from .filter_spectra import load_config, make_tokenizer, parse_charge
 from .mskb2proforma import convert as _mskb2proforma_convert
 from .types import Commands
 
@@ -641,10 +641,10 @@ def _filter_mgf_files(
     Per-criterion counts are written to the log. Returns a tuple of paths to
     the filtered MGF files in the same order as *mgf_files*.
     """
-    cfg = _load_config(casanovo_config)
+    cfg = load_config(casanovo_config)
     min_peaks: int = cfg.get("min_peaks", 20)
     max_charge: int = cfg.get("max_charge", 10)
-    tokenizer = _make_tokenizer(cfg)
+    tokenizer = make_tokenizer(cfg)
 
     logging.info(
         f"Filtering with Casanovo config: {casanovo_config} "
@@ -678,7 +678,7 @@ def _filter_mgf_files(
                     n_bad_seq += 1
                     continue
 
-                charge = _parse_charge(spectrum["params"].get("charge"))
+                charge = parse_charge(spectrum["params"].get("charge"))
                 if charge is None or charge <= 0 or charge > max_charge:
                     n_bad_charge += 1
                     continue

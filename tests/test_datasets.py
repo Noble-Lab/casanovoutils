@@ -1330,3 +1330,183 @@ class TestCreateDatasetsEnhancements:
         assert "CPEPTLDE" in bare_seqs
         for bare in bare_seqs:
             assert "[" not in bare
+
+
+# ---------------------------------------------------------------------------
+# Tests for casanovo_config filtering path in create_datasets
+# ---------------------------------------------------------------------------
+
+
+def _write_casanovo_config(path, *, residues=None, min_peaks=2, max_charge=5):
+    """Write a minimal Casanovo YAML config for testing."""
+    import yaml
+
+    if residues is None:
+        residues = {}  # uses depthcharge default vocabulary
+    cfg = {
+        "residues": residues,
+        "min_peaks": min_peaks,
+        "max_charge": max_charge,
+        "replace_isoleucine_with_leucine": False,
+    }
+    path.write_text(yaml.dump(cfg))
+    return path
+
+
+# 19 unique valid peptide sequences (standard amino acids only).
+_VALID_SEQS = [
+    "ACDEF",
+    "GHIKL",
+    "MNPQR",
+    "STVWY",
+    "AACDE",
+    "GHILK",
+    "MNPQY",
+    "STVWI",
+    "AAGDE",
+    "GHIKM",
+    "MNPRY",
+    "STVWK",
+    "AAKDE",
+    "GHIML",
+    "MNRQY",
+    "STVWM",
+    "AALEF",
+    "GHILN",
+    "MNPVY",
+]
+
+
+def _write_mgf_with_charge_field(path, spectra):
+    """Write spectra with explicit charge fields.
+
+    Parameters
+    ----------
+    spectra : list[tuple[str, int, list[float], list[float]]]
+        Each element is (seq, charge, mz_values, intensity_values).
+    """
+    import numpy as np
+
+    records = []
+    for seq, charge, mz, intensity in spectra:
+        record = {
+            "params": {"seq": seq, "pepmass": (500.0,), "charge": [charge]},
+            "m/z array": np.array(mz),
+            "intensity array": np.array(intensity),
+        }
+        records.append(record)
+    pyteomics.mgf.write(records, output=str(path))
+    return str(path)
+
+
+def _spectra_with_charge(seqs, charge=2, n_peaks=3):
+    """Return (seq, charge, mz_list, intensity_list) tuples for ``seqs``."""
+    mz = list(range(100, 100 + n_peaks * 10, 10))
+    inten = [1.0] * n_peaks
+    return [(s, charge, mz, inten) for s in seqs]
+
+
+class TestCasanovoConfigFilter:
+    """Tests for create_datasets with casanovo_config filtering."""
+
+    def _all_seqs(self, tmp_path, root="out"):
+        seqs = set()
+        for split in ("train", "val", "test"):
+            seqs.update(_get_peptides(_read_mgf(tmp_path / f"{root}.{split}.mgf")))
+        return seqs
+
+    def test_invalid_tokens_filtered(self, tmp_path):
+        """Spectra with tokens outside the config vocabulary are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        # "BBBB" contains B, which is not a standard amino acid.
+        spectra = [("BBBB", 2, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS)
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "BBBB" not in self._all_seqs(tmp_path)
+
+    def test_valid_spectra_pass_through(self, tmp_path):
+        """Spectra that meet all criteria appear in the output."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        mgf = _write_mgf_with_charge_field(
+            tmp_path / "input.mgf",
+            _spectra_with_charge(_VALID_SEQS + ["ACDEFG"]),
+        )
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        seqs = self._all_seqs(tmp_path)
+        assert all(s in seqs for s in _VALID_SEQS)
+
+    def test_too_few_peaks_filtered(self, tmp_path):
+        """Spectra with fewer than min_peaks peaks are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml", min_peaks=3)
+        # "ACDEF" has only 1 peak — fewer than min_peaks=3.
+        spectra = [("ACDEF", 2, [100.0], [1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS[1:])
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "ACDEF" not in self._all_seqs(tmp_path)
+
+    def test_bad_charge_filtered(self, tmp_path):
+        """Spectra with charge above max_charge are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml", max_charge=3)
+        # charge=6 exceeds max_charge=3.
+        spectra = [("ACDEF", 6, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS[1:])
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "ACDEF" not in self._all_seqs(tmp_path)
+
+    def test_missing_seq_filtered(self, tmp_path):
+        """Spectra with a missing SEQ field are excluded."""
+        import numpy as np
+
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        records = [
+            {
+                "params": {"pepmass": (500.0,), "charge": [2]},  # no "seq" key
+                "m/z array": np.array([100.0, 200.0, 300.0]),
+                "intensity array": np.array([1.0, 1.0, 1.0]),
+            }
+        ]
+        records += [
+            {
+                "params": {"seq": s, "pepmass": (500.0,), "charge": [2]},
+                "m/z array": np.array([100.0, 200.0, 300.0]),
+                "intensity array": np.array([1.0, 1.0, 1.0]),
+            }
+            for s in _VALID_SEQS
+        ]
+        pyteomics.mgf.write(records, output=str(tmp_path / "input.mgf"))
+
+        create_datasets(
+            str(tmp_path / "input.mgf"),
+            output_root=str(tmp_path / "out"),
+            casanovo_config=cfg,
+        )
+
+        seqs = self._all_seqs(tmp_path)
+        assert all(s in seqs for s in _VALID_SEQS)
+
+    def test_only_valid_spectra_contribute_to_splits(self, tmp_path):
+        """Split counts reflect the filtered set, not the raw input."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        # 1 invalid-token spectrum ("BBBB") + len(_VALID_SEQS) valid spectra.
+        spectra = [("BBBB", 2, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS)
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        total = sum(
+            len(_read_mgf(tmp_path / f"out.{split}.mgf"))
+            for split in ("train", "val", "test")
+        )
+        assert total == len(_VALID_SEQS)

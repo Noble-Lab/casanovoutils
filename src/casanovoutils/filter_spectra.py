@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _load_config(config_path: PathLike) -> dict:
+def load_config(config_path: PathLike) -> dict:
     """Load a Casanovo YAML config and return it as a dict."""
     with open(config_path) as fh:
         cfg = yaml.safe_load(fh)
@@ -47,7 +47,7 @@ def _load_config(config_path: PathLike) -> dict:
     return cfg
 
 
-def _make_tokenizer(cfg: dict) -> PeptideTokenizer:
+def make_tokenizer(cfg: dict) -> PeptideTokenizer:
     """Build a PeptideTokenizer from the residues in a Casanovo config."""
     return PeptideTokenizer(
         residues=cfg.get("residues", {}),
@@ -57,7 +57,7 @@ def _make_tokenizer(cfg: dict) -> PeptideTokenizer:
     )
 
 
-def _parse_charge(charge_raw) -> Optional[int]:
+def parse_charge(charge_raw) -> Optional[int]:
     """
     Return the charge as a positive int, or ``None`` if it is missing,
     ambiguous, zero, or cannot be converted.
@@ -123,23 +123,12 @@ def filter_spectra(
                 f"Use --overwrite to overwrite."
             )
 
-    # Always attach a file handler for log_out, even if root handlers exist
-    # from a prior configure_logging call.
     configure_logging(log_out)
-    if not any(
-        isinstance(h, logging.FileHandler) and h.baseFilename == str(log_out.resolve())
-        for h in logging.root.handlers
-    ):
-        file_handler = logging.FileHandler(log_out)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-        )
-        logging.root.addHandler(file_handler)
 
-    cfg = _load_config(config)
+    cfg = load_config(config)
     min_peaks: int = cfg.get("min_peaks", 20)
     max_charge: int = cfg.get("max_charge", 10)
-    tokenizer = _make_tokenizer(cfg)
+    tokenizer = make_tokenizer(cfg)
 
     logger.info("Input MGF  : %s", mgf_file)
     logger.info("Config     : %s", config)
@@ -178,7 +167,7 @@ def filter_spectra(
                 continue
 
             # --- 3. Invalid charge ------------------------------------------
-            charge = _parse_charge(spectrum["params"].get("charge"))
+            charge = parse_charge(spectrum["params"].get("charge"))
             if charge is None or charge <= 0 or charge > max_charge:
                 n_bad_charge += 1
                 continue
