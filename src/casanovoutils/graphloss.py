@@ -178,11 +178,55 @@ def read_from_file(input_path: Path) -> tuple[LossSeries, LossSeries]:
     return read_from_logfile(input_path)
 
 
+def _find_lr_column(fieldnames: list[str] | None) -> Optional[str]:
+    """Return the learning-rate column, if any.
+
+    Lightning's ``LearningRateMonitor`` logs the rate as ``lr-<optimizer>``
+    (e.g. ``lr-Adam``), next to ``-momentum`` and ``-weight_decay`` columns
+    that are ignored here.
+    """
+    for name in fieldnames or []:
+        if name.startswith("lr-") and not name.endswith(("-momentum", "-weight_decay")):
+            return name
+    return None
+
+
+def read_lr_from_csvfile(input_path: Path) -> LossSeries:
+    """Read the learning-rate series from a Casanovo `metrics.csv` file.
+
+    Returns an empty list if the file has no learning-rate column.
+    """
+    lr_series: LossSeries = []
+
+    with input_path.open("r", encoding="utf-8", newline="") as input_file:
+        reader = csv.DictReader(input_file)
+        lr_column = _find_lr_column(reader.fieldnames)
+        if lr_column is None:
+            return lr_series
+
+        for row in reader:
+            if not row.get("step"):
+                continue
+            lr_val = row.get(lr_column)
+            if lr_val:
+                lr_series.append((int(row["step"]), float(lr_val)))
+
+    return lr_series
+
+
+def read_lr_from_file(input_path: Path) -> LossSeries:
+    """Read the learning-rate series, if available (CSV inputs only)."""
+    if detect_input_format(input_path) == "csv":
+        return read_lr_from_csvfile(input_path)
+    return []
+
+
 def plot_losses(
     root: str,
     train_loss_lists: list[LossSeries],
     val_loss_lists: list[LossSeries],
     max_y: float | None,
+    lr_lists: list[LossSeries] | None = None,
 ) -> None:
     """Create and save the loss plot.
 
@@ -196,8 +240,15 @@ def plot_losses(
         A sequence of validation loss series.
     max_y
         Optional y-axis maximum.
+    lr_lists
+        Optional learning-rate series. When any are non-empty, a second
+        panel showing the learning rate is added below the loss plot.
     """
-    fig, ax = plt.subplots()
+    show_lr = bool(lr_lists) and any(lr_lists)
+    if show_lr:
+        fig, (ax, lr_ax) = plt.subplots(2, 1, sharex=True, height_ratios=[3, 1])
+    else:
+        fig, ax = plt.subplots()
 
     for i, train_loss_list in enumerate(train_loss_lists):
         if not train_loss_list:
@@ -213,7 +264,6 @@ def plot_losses(
         steps, losses = zip(*val_loss_list)
         ax.plot(steps, losses, "-o", markersize=2, label=label)
 
-    ax.set_xlabel("Step")
     ax.set_ylabel("Loss")
     ax.set_title(root)
 
@@ -224,8 +274,18 @@ def plot_losses(
     if labels:
         ax.legend(loc="upper right")
 
+    if show_lr:
+        for lr_list in lr_lists:
+            if lr_list:
+                steps, lrs = zip(*lr_list)
+                lr_ax.plot(steps, lrs, "-o", markersize=2)
+        lr_ax.set_ylabel("Learning rate")
+        lr_ax.set_xlabel("Step")
+    else:
+        ax.set_xlabel("Step")
+
     fig.set_figwidth(4)
-    fig.set_figheight(3)
+    fig.set_figheight(4 if show_lr else 3)
     fig.savefig(f"{root}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -234,6 +294,7 @@ def plot(
     root: str,
     inputs: list[str],
     max_y: Optional[float] = None,
+    show_lr: bool = False,
 ) -> None:
     """Read Casanovo log and/or metrics.csv files and plot training/validation loss.
 
@@ -246,17 +307,22 @@ def plot(
         One or more input files (Casanovo log files or ``metrics.csv`` files).
     max_y
         Optional y-axis maximum.
+    show_lr
+        If True, add a second panel showing the learning rate, read from
+        ``metrics.csv`` inputs.
     """
     configure_logging(pathlib.Path(root).with_suffix(".log"))
 
     train_loss_lists: list[LossSeries] = []
     val_loss_lists: list[LossSeries] = []
+    lr_lists: list[LossSeries] = []
     any_points = False
 
     for input_str in inputs:
         input_path = Path(input_str)
         try:
             train_loss_list, val_loss_list = read_from_file(input_path)
+            lr_list = read_lr_from_file(input_path) if show_lr else []
         except (OSError, ValueError) as exc:
             logging.error("Error reading %s: %s", input_path, exc)
             raise SystemExit(2) from exc
@@ -268,13 +334,24 @@ def plot(
 
         train_loss_lists.append(train_loss_list)
         val_loss_lists.append(val_loss_list)
+        if show_lr:
+            lr_lists.append(lr_list)
 
     if not any_points:
         logging.error("No loss entries found in any input file; nothing to plot.")
         raise SystemExit(2)
 
+    if show_lr and not any(lr_lists):
+        logging.warning("No learning-rate data found; omitting LR panel.")
+
     logging.info("Writing plot to %s.png", root)
-    plot_losses(root, train_loss_lists, val_loss_lists, max_y)
+    plot_losses(
+        root,
+        train_loss_lists,
+        val_loss_lists,
+        max_y,
+        lr_lists if show_lr else None,
+    )
 
 
 COMMANDS: Commands = plot
