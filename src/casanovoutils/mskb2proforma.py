@@ -152,7 +152,7 @@ def convert(
             "Use --overwrite to overwrite."
         )
 
-    configure_logging(output_file.with_suffix(".log"))
+    file_handler = configure_logging(output_file.with_suffix(".log"))
     logging.info("Converting %s -> %s", input_file, output_file)
 
     n_converted = 0
@@ -174,34 +174,39 @@ def convert(
                 ) from exc
         return {**spectrum, "params": params}
 
-    output_file = pathlib.Path(output_file)
-    tmp_dir = output_file.parent
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=tmp_dir, suffix=".mgf", delete=False
-    ) as tmp_fh:
-        tmp_path = pathlib.Path(tmp_fh.name)
-    # tmp_fh is now closed; write via path so no handle is open during cleanup.
-    with pyteomics.mgf.read(
-        str(input_file), use_index=False, use_header=False
-    ) as reader:
-        header = reader.header
-        spectra = tqdm.tqdm(reader, desc="Converting spectra", unit="spectrum")
+    try:
+        output_file = pathlib.Path(output_file)
+        tmp_dir = output_file.parent
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=tmp_dir, suffix=".mgf", delete=False
+        ) as tmp_fh:
+            tmp_path = pathlib.Path(tmp_fh.name)
+        # tmp_fh is now closed; write via path so no handle is open during cleanup.
+        with pyteomics.mgf.read(
+            str(input_file), use_index=False, use_header=False
+        ) as reader:
+            header = reader.header
+            spectra = tqdm.tqdm(reader, desc="Converting spectra", unit="spectrum")
+            try:
+                pyteomics.mgf.write(
+                    (_convert_spectrum(s) for s in spectra),
+                    output=str(tmp_path),
+                    header=header,
+                )
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
         try:
-            pyteomics.mgf.write(
-                (_convert_spectrum(s) for s in spectra),
-                output=str(tmp_path),
-                header=header,
-            )
+            tmp_path.replace(output_file)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
-    try:
-        tmp_path.replace(output_file)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
-    logging.info("Converted %d spectra", n_converted)
+        logging.info("Converted %d spectra", n_converted)
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
 
 COMMANDS: Commands = convert
