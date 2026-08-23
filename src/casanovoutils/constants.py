@@ -16,6 +16,10 @@ class Constants:
         (``"mztab_opt_global_aa_scores"``).  Use
         :meth:`get_aa_scores_column` to detect whichever variant is
         present in a DataFrame loaded from an mzTab file.
+    aa_scores_column_legacy : str
+        Legacy column name emitted by older versions of pyteomics
+        (``"mztab_opt_ms_run[1]_aa_scores"``), kept for backwards
+        compatibility with code that referenced the old constant value.
     pep_score_column : str
         Name of the column holding peptide-level search engine scores.
     aa_idx_column : str
@@ -33,6 +37,7 @@ class Constants:
 
     ground_truth_sequence_column: str = "mgf_seq"
     aa_scores_column: str = "mztab_opt_global_aa_scores"
+    aa_scores_column_legacy: str = "mztab_opt_ms_run[1]_aa_scores"
     pep_score_column: str = "mztab_search_engine_score[1]"
     aa_idx_column: str = "pc_aa_idx"
     precision_column: str = "pc_precision"
@@ -74,8 +79,10 @@ class Constants:
             return "mztab_opt_ms_run[1]_aa_scores"
         raise ValueError(
             "Cannot find per-amino-acid scores column in DataFrame. "
-            "Expected 'mztab_opt_global_aa_scores' (pyteomics >= current) or "
-            "'mztab_opt_ms_run[1]_aa_scores' (older pyteomics)."
+            "Expected 'mztab_opt_global_aa_scores' (mzTab spec opt_global_* name, "
+            "current pyteomics) or 'mztab_opt_ms_run[1]_aa_scores' "
+            "(legacy opt_ms_run[1]_* expansion from older pyteomics). "
+            f"Found columns: {df.columns}"
         )
 
     @staticmethod
