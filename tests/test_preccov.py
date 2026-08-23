@@ -292,9 +292,7 @@ def test_aa_match_prefix_il_equivalent():
 
 def test_aa_match_prefix_mass_mismatch():
     """Residues with clearly different masses do not match."""
-    aa_matches, pep_match = _aa_match_prefix(
-        ["A"], ["E"], _RESIDUES, 0.5, 0.1
-    )
+    aa_matches, pep_match = _aa_match_prefix(["A"], ["E"], _RESIDUES, 0.5, 0.1)
     assert pep_match is False
     assert not aa_matches.any()
 
