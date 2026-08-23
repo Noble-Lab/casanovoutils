@@ -60,7 +60,9 @@ class Constants:
         Parameters
         ----------
         df : pl.DataFrame
-            A DataFrame expected to contain the per-amino-acid scores column.
+            A DataFrame expected to contain one of
+            ``"mztab_opt_global_aa_scores"`` or
+            ``"mztab_opt_ms_run[1]_aa_scores"``.
 
         Returns
         -------
@@ -105,15 +107,18 @@ class Constants:
         Parameters
         ----------
         df : pl.DataFrame
-            A DataFrame expected to contain a predicted sequence column.
+            A DataFrame expected to contain one of
+            ``"mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"``,
+            ``"mztab_opt_ms_run[1]_proforma"``, or ``"mztab_sequence"``.
 
         Returns
         -------
         str
             The name of the predicted sequence column.
         """
-        if "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence" in df.columns:
-            return "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"
+        cv_col = "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"
+        if cv_col in df.columns:
+            return cv_col
         if "mztab_opt_ms_run[1]_proforma" in df.columns:
             return "mztab_opt_ms_run[1]_proforma"
         return "mztab_sequence"

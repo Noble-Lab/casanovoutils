@@ -361,11 +361,11 @@ def _aa_match_batch(
     results: list[tuple[np.ndarray, bool]] = []
     n_aa1, n_aa2 = 0, 0
     _split = re.compile(r"(?<=.)(?=[A-Z])").split
-    for p1, p2 in zip(peptides1, peptides2):
+    for p1, p2 in zip(peptides1, peptides2, strict=True):
         if isinstance(p1, str):
-            p1 = _split(p1)
+            p1 = _split(p1) if p1 else []
         if isinstance(p2, str):
-            p2 = _split(p2)
+            p2 = _split(p2) if p2 else []
         if not p1 and not p2:
             results.append((np.empty(0, dtype=bool), False))
             continue
@@ -764,6 +764,8 @@ def get_prec_cov_df(
         logging.debug(
             "Renaming aa scores column '%s' -> '%s'", aa_col, Constants.aa_scores_column
         )
+        if Constants.aa_scores_column in pc_df.columns:
+            pc_df = pc_df.drop(Constants.aa_scores_column)
         pc_df = pc_df.rename({aa_col: Constants.aa_scores_column})
 
     pc_df = fill_null_columns(pc_df, pred_col)
