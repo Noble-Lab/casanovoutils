@@ -1,6 +1,7 @@
 import csv
 
 import numpy as np
+import pytest
 
 from casanovoutils.summarize_mgf import (
     _extract_cterm_token,
@@ -723,3 +724,50 @@ def test_cterm_aa_distribution_integration(tmp_path):
 
     assert png_path.exists()
     assert png_path.stat().st_size > 0
+
+
+# ---------------------------------------------------------------------------
+# Graceful exit when all spectra are filtered out
+# ---------------------------------------------------------------------------
+
+SMALL_MGF_NO_SEQ = """\
+BEGIN IONS
+TITLE=spec1
+PEPMASS=500.0
+CHARGE=2+
+100.0 10
+200.0 20
+END IONS
+
+BEGIN IONS
+TITLE=spec2
+PEPMASS=600.0
+CHARGE=3+
+150.0 15
+250.0 25
+END IONS
+"""
+
+
+def test_all_spectra_filtered_exits(tmp_path):
+    """Both peptide_lengths and fragment_coverage exit with a non-zero status
+    when all spectra are filtered out (here: none have SEQ=)."""
+    mgf_path = tmp_path / "no_seq.mgf"
+    mgf_path.write_text(SMALL_MGF_NO_SEQ)
+
+    with pytest.raises(SystemExit) as exc_info:
+        peptide_lengths(
+            str(mgf_path),
+            output_tsv=str(tmp_path / "out.tsv"),
+            output_plot=str(tmp_path / "out.png"),
+        )
+    assert exc_info.value.code != 0
+
+    with pytest.raises(SystemExit) as exc_info:
+        fragment_coverage(
+            str(mgf_path),
+            output_tsv=str(tmp_path / "cov.tsv"),
+            output_full_tsv=str(tmp_path / "cov_full.tsv"),
+            output_plot=str(tmp_path / "cov.png"),
+        )
+    assert exc_info.value.code != 0

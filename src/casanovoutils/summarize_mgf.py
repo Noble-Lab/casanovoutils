@@ -456,6 +456,14 @@ def peptide_lengths(
             file=sys.stderr,
         )
 
+    if not lengths:
+        print(
+            "Error: no spectra with valid SEQ= in ProForma notation found."
+            " Nothing to output.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     counts_map = Counter(lengths)
 
     # -- TSV output (sorted by length) ----------------------------------------
@@ -906,6 +914,15 @@ def fragment_coverage(
     count = len(results) + n_skipped
     print(f"Processed {count} spectra total.", file=sys.stderr)
     print(f"  {len(results)} scored, {n_skipped} skipped.", file=sys.stderr)
+
+    if not results:
+        print(
+            "Error: no spectra could be scored (all were skipped due to"
+            " missing SEQ=, invalid ProForma, or missing/ambiguous charge)."
+            " Nothing to output.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # -- Full per-spectrum TSV (in input order) --------------------------------
     with open(output_full_tsv, "w", newline="") as fh:
