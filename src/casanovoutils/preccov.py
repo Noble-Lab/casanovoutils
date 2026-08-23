@@ -378,7 +378,9 @@ def _aa_match_batch(
         n_aa1 += len(p1)
         n_aa2 += len(p2)
         results.append(
-            _aa_match_prefix_suffix(p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold)
+            _aa_match_prefix_suffix(
+                p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold
+            )
         )
     return results, n_aa1, n_aa2
 
