@@ -23,6 +23,7 @@ import dataclasses
 import functools
 import logging
 import pathlib
+import re
 from os import PathLike
 from typing import Any, Optional
 
@@ -42,6 +43,7 @@ from .denovoutils import (
     tokenize_sequences,
     write_dataframe,
 )
+from .residues import get_residues
 from .types import Commands
 
 
@@ -240,14 +242,161 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
     return row
 
 
-def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame:
+def _aa_match_prefix(
+    peptide1: list[str],
+    peptide2: list[str],
+    aa_dict: dict[str, float],
+    cum_mass_threshold: float,
+    ind_mass_threshold: float,
+) -> tuple[np.ndarray, bool]:
+    """Match the longest mass-consistent prefix between two tokenized peptides.
+
+    Walks both sequences simultaneously, advancing whichever side has the lower
+    cumulative mass when the two sides fall out of sync, similar to the DeepNovo
+    evaluation criterion.
+
+    Parameters
+    ----------
+    peptide1, peptide2 : list[str]
+        Tokenized amino acid sequences (one token per residue).
+    aa_dict : dict[str, float]
+        Mapping of token → monoisotopic mass (Da).  Unknown tokens map to 0.
+    cum_mass_threshold : float
+        Maximum allowed difference (Da) between cumulative masses at a matched
+        position.
+    ind_mass_threshold : float
+        Maximum allowed mass difference (Da) between two individually matched
+        residues.
+
+    Returns
+    -------
+    aa_matches : np.ndarray of bool, length max(len(p1), len(p2))
+        True at position i when the residues at that aligned position match.
+    pep_match : bool
+        True when every position matches (full-sequence match).
+    """
+    aa_matches = np.zeros(max(len(peptide1), len(peptide2)), dtype=bool)
+    i1, i2, cum1, cum2 = 0, 0, 0.0, 0.0
+    while i1 < len(peptide1) and i2 < len(peptide2):
+        m1 = aa_dict.get(peptide1[i1], 0.0)
+        m2 = aa_dict.get(peptide2[i2], 0.0)
+        if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
+            aa_matches[max(i1, i2)] = abs(m1 - m2) < ind_mass_threshold
+            i1, i2 = i1 + 1, i2 + 1
+            cum1, cum2 = cum1 + m1, cum2 + m2
+        elif cum2 + m2 > cum1 + m1:
+            i1, cum1 = i1 + 1, cum1 + m1
+        else:
+            i2, cum2 = i2 + 1, cum2 + m2
+    return aa_matches, bool(aa_matches.all())
+
+
+def _aa_match_prefix_suffix(
+    peptide1: list[str],
+    peptide2: list[str],
+    aa_dict: dict[str, float],
+    cum_mass_threshold: float,
+    ind_mass_threshold: float,
+) -> tuple[np.ndarray, bool]:
+    """Match the longest mass-consistent prefix **and** suffix between two peptides.
+
+    Runs :func:`_aa_match_prefix` forward first; if the sequences do not fully
+    match, a backward pass is run from the C-terminus down to the first
+    unmatched position, and the results are merged.
+    """
+    aa_matches, pep_match = _aa_match_prefix(
+        peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
+    )
+    if pep_match:
+        return aa_matches, pep_match
+    # Backward pass from C-terminus to first unmatched position.
+    i_stop = int(np.argwhere(~aa_matches)[0, 0])
+    i1, i2, cum1, cum2 = len(peptide1) - 1, len(peptide2) - 1, 0.0, 0.0
+    while i1 >= i_stop and i2 >= i_stop:
+        m1 = aa_dict.get(peptide1[i1], 0.0)
+        m2 = aa_dict.get(peptide2[i2], 0.0)
+        if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
+            aa_matches[max(i1, i2)] = abs(m1 - m2) < ind_mass_threshold
+            i1, i2 = i1 - 1, i2 - 1
+            cum1, cum2 = cum1 + m1, cum2 + m2
+        elif cum2 + m2 > cum1 + m1:
+            i1, cum1 = i1 - 1, cum1 + m1
+        else:
+            i2, cum2 = i2 - 1, cum2 + m2
+    return aa_matches, bool(aa_matches.all())
+
+
+def _aa_match_batch(
+    peptides1: list,
+    peptides2: list,
+    aa_dict: dict[str, float],
+    cum_mass_threshold: float = 0.5,
+    ind_mass_threshold: float = 0.1,
+) -> tuple[list[tuple[np.ndarray, bool]], int, int]:
+    """Apply mass-based matching to a batch of predicted/ground-truth pairs.
+
+    Mirrors the ``aa_match_batch`` function from Casanovo without depending on
+    that package.  Accepts either pre-tokenized lists of strings or plain
+    strings (which are split on uppercase letter boundaries, e.g. ``"AGK"``
+    → ``["A", "G", "K"]``).
+
+    Parameters
+    ----------
+    peptides1, peptides2 : list
+        Parallel iterables of peptide sequences (list[str] or str each).
+    aa_dict : dict[str, float]
+        Residue mass dictionary from :func:`.residues.get_residues`.
+    cum_mass_threshold : float
+        Cumulative-mass tolerance (Da), default 0.5.
+    ind_mass_threshold : float
+        Per-residue mass tolerance (Da), default 0.1.
+
+    Returns
+    -------
+    aa_matches_batch : list[tuple[np.ndarray, bool]]
+        Per-pair match arrays and peptide-level booleans.
+    n_aa1, n_aa2 : int
+        Total residue counts across all sequences in each list.
+    """
+    results: list[tuple[np.ndarray, bool]] = []
+    n_aa1, n_aa2 = 0, 0
+    _split = re.compile(r"(?<=.)(?=[A-Z])").split
+    for p1, p2 in zip(peptides1, peptides2):
+        if isinstance(p1, str):
+            p1 = _split(p1)
+        if isinstance(p2, str):
+            p2 = _split(p2)
+        if not p1 and not p2:
+            results.append((np.empty(0, dtype=bool), False))
+            continue
+        if not p1 or not p2:
+            stub = p1 if p2 is None or len(p2) == 0 else p2
+            results.append((np.zeros(len(stub), dtype=bool), False))
+            n_aa1 += len(p1) if p1 else 0
+            n_aa2 += len(p2) if p2 else 0
+            continue
+        n_aa1 += len(p1)
+        n_aa2 += len(p2)
+        results.append(
+            _aa_match_prefix_suffix(p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold)
+        )
+    return results, n_aa1, n_aa2
+
+
+def calc_precision_coverage(
+    pc_df: pl.DataFrame,
+    score_col: str,
+    cum_mass_threshold: float = 0.5,
+    ind_mass_threshold: float = 0.1,
+    residues_path: Optional[PathLike] = None,
+) -> pl.DataFrame:
     """
     Compute cumulative precision and coverage curves sorted by score.
 
-    Sorts the DataFrame by ``score_col`` in descending order, computes a
-    boolean correctness column indicating where the predicted sequence matches
-    the ground truth, then calculates cumulative precision and coverage at
-    each rank threshold.
+    Sorts the DataFrame by ``score_col`` in descending order, determines
+    peptide correctness using mass-based matching (so mass-equivalent residues
+    such as I and L are treated as identical), then calculates cumulative
+    precision and coverage at each rank threshold.
 
     Parameters
     ----------
@@ -258,6 +407,15 @@ def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame
         Name of the column to sort by. Typically either the peptide-level
         score column or the per-amino-acid score column depending on whether
         evaluation is at peptide or amino acid level.
+    cum_mass_threshold : float
+        Maximum cumulative mass difference (Da) allowed when aligning two
+        sequences.  Default 0.5 Da.
+    ind_mass_threshold : float
+        Maximum per-residue mass difference (Da) for a position to be counted
+        as a match.  Default 0.1 Da.
+    residues_path : PathLike, optional
+        Path to a residue mass YAML file.  If ``None``, the bundled
+        ``residues.yaml`` is used.
 
     Returns
     -------
@@ -269,11 +427,15 @@ def calc_precision_coverage(pc_df: pl.DataFrame, score_col: str) -> pl.DataFrame
     logging.debug("Computing precision-coverage using score column '%s'", score_col)
 
     pc_df = pc_df.sort(score_col, descending=True)
-    pc_df = pc_df.with_columns(
-        (
-            pl.col(Constants.ground_truth_tokens) == pl.col(Constants.predicted_tokens)
-        ).alias("pc_is_correct")
+
+    aa_dict = get_residues(residues_path)
+    pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
+    truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
+    batch, _, _ = _aa_match_batch(
+        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
+    pep_matches = np.array([m[1] for m in batch], dtype=bool)
+    pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))
 
     is_correct = pc_df.get_column("pc_is_correct").to_numpy()
 
@@ -529,6 +691,8 @@ def get_prec_cov_df(
     aa_level: bool = False,
     align_tie_beak_suffix: bool = True,
     out_path: Optional[PathLike] = None,
+    cum_mass_threshold: float = 0.5,
+    ind_mass_threshold: float = 0.1,
 ) -> pl.DataFrame:
     """
     Build a precision-coverage DataFrame from predicted and ground truth PSMs.
@@ -612,7 +776,9 @@ def get_prec_cov_df(
 
     score_col = Constants.aa_scores_column if aa_level else Constants.pep_score_column
     logging.debug("Computing precision-coverage with score column '%s'", score_col)
-    pc_df = calc_precision_coverage(pc_df, score_col)
+    pc_df = calc_precision_coverage(
+        pc_df, score_col, cum_mass_threshold, ind_mass_threshold, residues_path
+    )
 
     logging.info(
         "Precision-coverage DataFrame complete: %d rows, %d columns",

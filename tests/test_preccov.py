@@ -4,6 +4,8 @@ import pytest
 
 from casanovoutils.constants import Constants
 from casanovoutils.preccov import (
+    _aa_match_batch,
+    _aa_match_prefix,
     align_tokens_with_gaps,
     calc_precision_coverage,
     fill_null_columns,
@@ -194,9 +196,12 @@ def test_calc_precision_coverage_output_columns(pc_input_df):
 
 def test_calc_precision_coverage_correctness_flag(pc_input_df):
     result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
-    # sorted descending by score: A(0.9)=correct, B(0.8)=wrong, C(0.7)=correct, D(0.6)=wrong
-    # correctness compares Constants.predicted_tokens against Constants.ground_truth_tokens
-    assert result["pc_is_correct"].to_list() == [True, False, True, False]
+    # sorted descending by score: A(0.9), B(0.8), C(0.7), D(0.6)
+    # A vs A: same token → match.
+    # B vs X: both unknown (mass 0) → cumulative delta 0 < 0.5 and ind delta 0 < 0.1 → match.
+    # C vs C: same token → match.
+    # D (115.03 Da) vs Y (163.06 Da): delta ~48 Da > 0.5 → no match.
+    assert result["pc_is_correct"].to_list() == [True, True, True, False]
 
 
 def test_calc_precision_coverage_precision_range(pc_input_df):
@@ -236,10 +241,13 @@ def test_calc_precision_coverage_all_correct():
 
 
 def test_calc_precision_coverage_all_wrong():
+    # Use known amino acids whose masses are clearly distinct so mass-based
+    # matching correctly identifies them as non-matching.
+    # A=71.04, Q=128.06, W=186.08 vs X(unk,0), Y=163.06, V=99.07 — all deltas > 0.5 Da.
     df = pl.DataFrame(
         {
-            Constants.predicted_tokens: ["A", "B", "C"],
-            Constants.ground_truth_tokens: ["X", "Y", "Z"],
+            Constants.predicted_tokens: ["A", "Q", "W"],
+            Constants.ground_truth_tokens: ["X", "Y", "V"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
         }
@@ -248,6 +256,80 @@ def test_calc_precision_coverage_all_wrong():
     assert all(
         p == pytest.approx(0.0) for p in result[Constants.precision_column].to_list()
     )
+
+
+
+# ── mass-based matching helpers ───────────────────────────────────────────────
+
+# Monoisotopic masses used in residues.yaml (a subset sufficient for these tests)
+_RESIDUES = {
+    "G": 57.021464,
+    "A": 71.037114,
+    "L": 113.084064,
+    "I": 113.084064,  # same mass as L
+    "D": 115.026943,
+    "E": 129.042593,
+}
+
+
+def test_aa_match_prefix_identical():
+    """Identical sequences fully match."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["A", "G", "L"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is True
+    assert aa_matches.all()
+
+
+def test_aa_match_prefix_il_equivalent():
+    """I and L have the same mass and are treated as a match."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["A", "I", "G"], ["A", "L", "G"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is True
+    assert aa_matches.all()
+
+
+def test_aa_match_prefix_mass_mismatch():
+    """Residues with clearly different masses do not match."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["A"], ["E"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is False
+    assert not aa_matches.any()
+
+
+def test_aa_match_prefix_length_mismatch():
+    """Sequences of different lengths never fully match."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["A", "G"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is False
+
+
+def test_aa_match_batch_il_equivalence():
+    """_aa_match_batch marks I/L substitutions as correct at peptide level."""
+    batch, _, _ = _aa_match_batch(
+        [["A", "I", "D"], ["G", "L"]],
+        [["A", "L", "D"], ["G", "I"]],
+        _RESIDUES,
+    )
+    assert batch[0][1] is True  # LAID ≈ WALD (I/L swap)
+    assert batch[1][1] is True  # GL ≈ GI (I/L swap)
+
+
+def test_calc_precision_coverage_il_match():
+    """I/L-swapped predictions are counted as correct by default."""
+    df = pl.DataFrame(
+        {
+            Constants.predicted_tokens: [["A", "I", "G"], ["A", "L", "G"]],
+            Constants.ground_truth_tokens: [["A", "L", "G"], ["A", "I", "G"]],
+            Constants.pep_score_column: [0.9, 0.8],
+            Constants.aa_scores_column: ["", ""],
+        }
+    )
+    result = calc_precision_coverage(df, Constants.pep_score_column)
+    assert result["pc_is_correct"].to_list() == [True, True]
 
 
 # ── tests for Constants.get_aa_scores_column ─────────────────────────────────
