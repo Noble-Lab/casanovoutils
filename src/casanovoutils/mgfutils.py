@@ -214,12 +214,21 @@ def _iter_raw_blocks(paths: Iterable[PathLike]) -> Iterable[str]:
     not preserved. This is intentional: global headers are uncommon in practice
     and the fast path is not a drop-in replacement for the pyteomics round-trip
     in their presence.
+
+    Malformed entries (a ``BEGIN IONS`` that is never closed, or a second
+    ``BEGIN IONS`` before ``END IONS``) are logged as warnings and skipped.
     """
     for path in paths:
         with open(path) as f:
             block: list[str] = []
             for line in f:
                 if line.strip() == "BEGIN IONS":
+                    if block:
+                        logging.warning(
+                            "Malformed MGF in %s: new BEGIN IONS before END IONS"
+                            " — skipping incomplete block",
+                            path,
+                        )
                     block = [line]
                 elif line.strip() == "END IONS":
                     block.append(line)
@@ -227,6 +236,12 @@ def _iter_raw_blocks(paths: Iterable[PathLike]) -> Iterable[str]:
                     block = []
                 elif block:
                     block.append(line)
+            if block:
+                logging.warning(
+                    "Malformed MGF in %s: file ended without END IONS"
+                    " — skipping incomplete block",
+                    path,
+                )
 
 
 def shuffle(
