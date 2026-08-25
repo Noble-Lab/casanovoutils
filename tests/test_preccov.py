@@ -23,10 +23,13 @@ def pred_col():
 
 @pytest.fixture
 def pc_input_df():
+    # "K" is used as the known matching pair (K=128.095 in residues.yaml).
+    # "C" is intentionally avoided: only "C[Carbamidomethyl]" is in the
+    # residues.yaml vocabulary, so bare "C" is an unknown token.
     return pl.DataFrame(
         {
-            Constants.predicted_tokens: ["A", "B", "C", "D"],
-            Constants.ground_truth_tokens: ["A", "X", "C", "Y"],
+            Constants.predicted_tokens: ["A", "B", "K", "D"],
+            Constants.ground_truth_tokens: ["A", "X", "K", "Y"],
             Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
             Constants.aa_scores_column: ["", "", "", ""],
         }
@@ -197,11 +200,12 @@ def test_calc_precision_coverage_output_columns(pc_input_df):
 def test_calc_precision_coverage_correctness_flag(pc_input_df):
     result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
     # sorted descending by score: A(0.9), B(0.8), C(0.7), D(0.6)
-    # A vs A: same token → match.
-    # B vs X: both unknown (mass 0) → cumulative delta 0 < 0.5 and ind delta 0 < 0.1 → match.
-    # C vs C: same token → match.
+    # A vs A: same known token → match.
+    # B vs X: both unknown (not in residue dict) → no match even though
+    #         cumulative delta is 0; unknown tokens cannot match.
+    # C vs C: same known token → match.
     # D (115.03 Da) vs Y (163.06 Da): delta ~48 Da > 0.5 → no match.
-    assert result["pc_is_correct"].to_list() == [True, True, True, False]
+    assert result["pc_is_correct"].to_list() == [True, False, True, False]
 
 
 def test_calc_precision_coverage_precision_range(pc_input_df):
@@ -226,10 +230,12 @@ def test_calc_precision_coverage_sorted_descending(pc_input_df):
 
 
 def test_calc_precision_coverage_all_correct():
+    # Use only tokens present in residues.yaml (bare "C" is not; only
+    # "C[Carbamidomethyl]" is).
     df = pl.DataFrame(
         {
-            Constants.predicted_tokens: ["A", "B", "C"],
-            Constants.ground_truth_tokens: ["A", "B", "C"],
+            Constants.predicted_tokens: ["A", "K", "G"],
+            Constants.ground_truth_tokens: ["A", "K", "G"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
         }

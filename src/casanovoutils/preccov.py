@@ -280,8 +280,14 @@ def _aa_match_prefix(
     while i1 < len(peptide1) and i2 < len(peptide2):
         m1 = aa_dict.get(peptide1[i1], 0.0)
         m2 = aa_dict.get(peptide2[i2], 0.0)
+        m1_known = peptide1[i1] in aa_dict
+        m2_known = peptide2[i2] in aa_dict
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            aa_matches[max(i1, i2)] = abs(m1 - m2) < ind_mass_threshold
+            # Require both tokens to be known residues to count as a match;
+            # unknown tokens (mass defaulting to 0.0) must not match each other.
+            aa_matches[max(i1, i2)] = (
+                m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
+            )
             i1, i2 = i1 + 1, i2 + 1
             cum1, cum2 = cum1 + m1, cum2 + m2
         elif cum2 + m2 > cum1 + m1:
@@ -315,8 +321,12 @@ def _aa_match_prefix_suffix(
     while i1 >= i_stop and i2 >= i_stop:
         m1 = aa_dict.get(peptide1[i1], 0.0)
         m2 = aa_dict.get(peptide2[i2], 0.0)
+        m1_known = peptide1[i1] in aa_dict
+        m2_known = peptide2[i2] in aa_dict
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            aa_matches[max(i1, i2)] = abs(m1 - m2) < ind_mass_threshold
+            aa_matches[max(i1, i2)] = (
+                m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
+            )
             i1, i2 = i1 - 1, i2 - 1
             cum1, cum2 = cum1 + m1, cum2 + m2
         elif cum2 + m2 > cum1 + m1:
