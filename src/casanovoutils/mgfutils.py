@@ -255,7 +255,10 @@ def shuffle(
     When *spectra* is a file path (or iterable of file paths) and *outfile* is
     provided, a fast raw-text path is used: entries are shuffled as opaque
     strings without parsing peaks, which is significantly faster than the
-    pyteomics parse/serialize round-trip.
+    pyteomics parse/serialize round-trip.  Note that the fast path does not
+    preserve MGF global header parameters (lines before the first
+    ``BEGIN IONS``); use the slow path (pass parsed spectra) if your files
+    rely on global defaults.
 
     Parameters
     ----------
