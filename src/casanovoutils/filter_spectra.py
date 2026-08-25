@@ -129,6 +129,7 @@ def filter_spectra(
     min_peaks: int = cfg.get("min_peaks", 20)
     max_charge: int = cfg.get("max_charge", 10)
     tokenizer = make_tokenizer(cfg)
+    vocab: set[str] = set(cfg.get("residues", {}).keys())
 
     logger.info("Input MGF  : %s", mgf_file)
     logger.info("Config     : %s", config)
@@ -160,9 +161,18 @@ def filter_spectra(
                 continue
 
             # --- 2. Unknown tokens in sequence ------------------------------
+            # Use split() to get ProForma-aware tokens, then check each
+            # strictly against the configured vocabulary.  tokenize() accepts
+            # standard AAs regardless of the configured residues dict, so it
+            # would allow e.g. bare "C" even when only "C[Carbamidomethyl]"
+            # is in the vocabulary.  split() raises ProFormaError for
+            # malformed sequences and ValueError for other parse failures.
             try:
-                tokenizer.tokenize(seq)
-            except ValueError:
+                tokens = tokenizer.split(seq)
+            except Exception:
+                n_bad_seq += 1
+                continue
+            if not all(tok in vocab for tok in tokens):
                 n_bad_seq += 1
                 continue
 
