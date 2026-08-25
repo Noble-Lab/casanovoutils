@@ -381,7 +381,9 @@ def pipeline(
             result = shuffle(result, random_seed=random_seed)
 
         if downsample_k is not None:
-            result = spectra_per_peptide(result, k=downsample_k, random_seed=random_seed)
+            result = spectra_per_peptide(
+                result, k=downsample_k, random_seed=random_seed
+            )
 
         if purge_epsilon is not None:
             result = purge_redundant(result, epsilon=purge_epsilon)
