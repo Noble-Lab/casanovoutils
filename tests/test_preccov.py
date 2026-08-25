@@ -258,7 +258,6 @@ def test_calc_precision_coverage_all_wrong():
     )
 
 
-
 # ── mass-based matching helpers ───────────────────────────────────────────────
 
 # Monoisotopic masses used in residues.yaml (a subset sufficient for these tests)
