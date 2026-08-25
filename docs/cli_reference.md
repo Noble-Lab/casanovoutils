@@ -60,8 +60,8 @@ its enabling parameter is omitted.
 **Examples:**
 
 ```bash
-# Shuffle only
-casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle False
+# Shuffle only (default; no extra flags needed)
+casanovoutils mgfutils pipeline input.mgf --outfile out.mgf
 
 # Cap at 2 spectra per peptide, no shuffle
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle --downsample_k 2

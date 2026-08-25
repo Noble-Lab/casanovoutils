@@ -310,9 +310,12 @@ def shuffle(
                 random.shuffle(blocks)
                 logging.info("Shuffled %d spectra", len(blocks))
                 with open(outfile, "w") as f:
-                    f.writelines(
-                        tqdm.tqdm(blocks, desc=f"Writing {outfile}", unit="psm")
-                    )
+                    for block in tqdm.tqdm(
+                        blocks, desc=f"Writing {outfile}", unit="psm"
+                    ):
+                        f.write(block)
+                        if not block.endswith("\n"):
+                            f.write("\n")
                 return []
 
         result = list(iter_spectra(spectra, desc="Reading spectra"))
