@@ -335,7 +335,7 @@ def get_mztab_df(
         return mztab_path
 
     logging.info("Reading mzTab file %s", str(mztab_path))
-    result = pyteomics.mztab.MzTab(mztab_path).spectrum_match_table
+    result = pyteomics.mztab.MzTab(str(mztab_path)).spectrum_match_table
     result = pl.from_pandas(result)
     logging.info("Read %d spectrum matches from %s", len(result), str(mztab_path))
     result = result.rename({c: f"mztab_{c}" for c in result.columns})
