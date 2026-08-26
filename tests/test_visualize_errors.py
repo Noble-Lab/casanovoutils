@@ -179,3 +179,41 @@ def test_visualize_errors_overwrite_true_succeeds(tmp_path):
         k=1,
         overwrite=True,
     )
+
+
+def test_visualize_errors_distinct_il_produces_output(tmp_path):
+    """distinct_il=True should run without error and still produce plots."""
+    visualize_errors(
+        mgf_file=TEST_MGF,
+        mztab_file=TEST_MZTAB,
+        output_dir=tmp_path / "out",
+        k=5,
+        distinct_il=True,
+    )
+    pngs = list((tmp_path / "out").glob("rank_*.png"))
+    # With distinct_il=True, I/L swaps count as errors, so we expect at least
+    # as many (possibly more) incorrect predictions as without.
+    assert len(pngs) >= 1
+
+
+def test_distinct_il_produces_at_least_as_many_errors(tmp_path):
+    """distinct_il=True should find >= as many errors as the default (I/L equiv)."""
+    out_equiv = tmp_path / "il_equiv"
+    out_distinct = tmp_path / "il_distinct"
+    visualize_errors(
+        mgf_file=TEST_MGF,
+        mztab_file=TEST_MZTAB,
+        output_dir=out_equiv,
+        k=20,
+        distinct_il=False,
+    )
+    visualize_errors(
+        mgf_file=TEST_MGF,
+        mztab_file=TEST_MZTAB,
+        output_dir=out_distinct,
+        k=20,
+        distinct_il=True,
+    )
+    n_equiv = len(list(out_equiv.glob("rank_*.png")))
+    n_distinct = len(list(out_distinct.glob("rank_*.png")))
+    assert n_distinct >= n_equiv

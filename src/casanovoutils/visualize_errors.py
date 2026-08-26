@@ -196,6 +196,7 @@ def visualize_errors(
     fragment_tol_mode: str = "Da",
     ion_types: str = "by",
     neutral_losses: bool = False,
+    distinct_il: bool = False,
     overwrite: bool = False,
     residues_path: Optional[PathLike] = None,
 ) -> None:
@@ -203,12 +204,18 @@ def visualize_errors(
     Plot the top-k incorrectly predicted spectra from a Casanovo run.
 
     Loads an annotated MGF file and a Casanovo mzTab file, joins them,
-    identifies incorrect predictions using mass-based matching (I/L
-    equivalent), sorts by descending Casanovo score, and writes one mirror
-    plot per spectrum to *output_dir*.  Each plot shows the predicted
-    sequence annotated on the top panel and the ground truth sequence on the
-    mirrored bottom panel, with a header block displaying score, charge,
-    precursor m/z, Δm/z in Da and ppm, and scan number.
+    identifies incorrect predictions using mass-based matching, sorts by
+    descending Casanovo score, and writes one mirror plot per spectrum to
+    *output_dir*.  Each plot shows the predicted sequence annotated on the
+    top panel and the ground truth sequence on the mirrored bottom panel,
+    with a header block displaying score, charge, precursor m/z, Δm/z in
+    Da and ppm, and scan number.
+
+    By default isoleucine (I) and leucine (L) are treated as equivalent
+    when deciding whether a prediction is correct (they have the same
+    monoisotopic mass and cannot be distinguished by standard CID/HCD
+    fragmentation).  Pass ``--distinct_il`` to treat them as distinct
+    amino acids instead.
 
     Parameters
     ----------
@@ -229,6 +236,11 @@ def visualize_errors(
         Ion series to annotate, e.g. ``"by"`` (default) or ``"abcxyz"``.
     neutral_losses : bool, optional
         If ``True``, annotate NH3 and H2O neutral losses (default ``False``).
+    distinct_il : bool, optional
+        If ``True``, treat isoleucine (I) and leucine (L) as distinct amino
+        acids when deciding correctness.  By default (``False``) they are
+        considered equivalent, which is the standard practice for CID/HCD
+        data because the two residues have identical monoisotopic masses.
     overwrite : bool, optional
         If ``False`` (default), raise ``FileExistsError`` if *output_dir*
         already contains PNG files from a previous run.
@@ -251,7 +263,11 @@ def visualize_errors(
 
     try:
         logging.info(
-            "visualize_errors: mgf=%s  mztab=%s  k=%d", mgf_file, mztab_file, k
+            "visualize_errors: mgf=%s  mztab=%s  k=%d  distinct_il=%s",
+            mgf_file,
+            mztab_file,
+            k,
+            distinct_il,
         )
 
         # ── 1. Build merged ground-truth + prediction DataFrame ──────────────
@@ -268,10 +284,13 @@ def visualize_errors(
 
         pc_df = fill_null_columns(pc_df, pred_col)
         pc_df = tokenize_and_parse_scores(
-            pc_df, pred_col, residues_path, replace_isoleucine_with_leucine=True
+            pc_df,
+            pred_col,
+            residues_path,
+            replace_isoleucine_with_leucine=not distinct_il,
         )
 
-        # ── 2. Mass-based correctness (I/L equivalent) ───────────────────────
+        # ── 2. Mass-based correctness ─────────────────────────────────────────
         pc_df = calc_precision_coverage(pc_df, Constants.pep_score_column)
 
         n_total = len(pc_df)
