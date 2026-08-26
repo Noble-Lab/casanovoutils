@@ -330,6 +330,12 @@ def visualize_errors(
             if scan_raw is None:
                 scan_raw = row.get("mgf_scan") or row.get("mgf_scans")
             scan = str(scan_raw) if scan_raw is not None else "?"
+            # Strip the "ms_run[N]:scan=" prefix that Casanovo writes so that
+            # the filename contains only the bare integer.  Colons and brackets
+            # are invalid (or trigger NTFS alternate-data-stream behaviour) on
+            # Windows, so we must not include them in the output path.
+            if "scan=" in scan:
+                scan = scan.split("scan=")[-1]
 
             mgf_idx: Optional[int] = None
             if has_ref:
