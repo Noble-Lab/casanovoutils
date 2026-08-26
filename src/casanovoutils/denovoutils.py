@@ -396,7 +396,7 @@ def get_ground_truth_df(
         index_exprs.append(
             pl.when(pl.col("mztab_spectra_ref").str.starts_with(prefix))
             .then(
-                pl.col("mztab_spectra_ref").str.slice(len(prefix)).cast(pl.Int64)
+                pl.col("mztab_spectra_ref").str.slice(len(prefix)).str.strip_chars().cast(pl.Int64)
                 + offset
             )
             .otherwise(pl.col("tmp_mgf_idx"))
