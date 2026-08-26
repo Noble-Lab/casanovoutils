@@ -164,3 +164,58 @@ def test_real_package_commands_are_dicts_or_callables():
         assert isinstance(value, dict) or callable(
             value
         ), f"COMMANDS for {key!r} must be a dict or callable, got {type(value)}"
+
+
+# ---------------------------------------------------------------------------
+# strict_booleans
+# ---------------------------------------------------------------------------
+
+
+def _probe(aa_level: bool = False, name: str = "x"):
+    """Stand-in command with one boolean and one string parameter."""
+    return aa_level, name
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("false", False),
+        ("False", False),
+        ("true", True),
+        ("True", True),
+        (False, False),
+        (True, True),
+    ],
+)
+def test_strict_booleans_parses_bool_parameters(value, expected):
+    """fire leaves --flag=false a truthy string; it must reach the command as a bool."""
+    wrapped = main_mod.strict_booleans(_probe)
+    assert wrapped(aa_level=value) == (expected, "x")
+
+
+def test_strict_booleans_leaves_non_bool_parameters_alone():
+    wrapped = main_mod.strict_booleans(_probe)
+    assert wrapped(name="false") == (False, "false")
+
+
+def test_strict_booleans_rejects_non_boolean_strings():
+    wrapped = main_mod.strict_booleans(_probe)
+    with pytest.raises(ValueError, match="expects true or false"):
+        wrapped(aa_level="maybe")
+
+
+def test_strict_booleans_recurses_into_nested_commands():
+    wrapped = main_mod.strict_booleans({"group": {"probe": _probe}})
+    assert wrapped["group"]["probe"](aa_level="false") == (False, "x")
+
+
+def test_main_wraps_commands_before_firing():
+    """The real get_pc_df must reach fire wrapped, since it takes --aa_level."""
+    from casanovoutils import preccov
+
+    with patch("casanovoutils.main.fire.Fire") as mock_fire:
+        main_mod.main()
+
+    get_pc_df = mock_fire.call_args[0][0]["preccov"]["get_pc_df"]
+    assert get_pc_df is not preccov.get_prec_cov_df
+    assert get_pc_df.__wrapped__ is preccov.get_prec_cov_df
