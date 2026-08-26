@@ -45,14 +45,29 @@ except ImportError as e:  # pragma: no cover
 # ---------------------------------------------------------------------------
 
 
-def _load_mgf_peaks(mgf_file: PathLike) -> dict[int, dict]:
-    """Return a dict mapping 0-based spectrum index → pyteomics spectrum dict."""
+def _load_mgf_peaks(
+    mgf_file: PathLike, indices: Optional[set[int]] = None
+) -> dict[int, dict]:
+    """Return a dict mapping 0-based spectrum index → pyteomics spectrum dict.
+
+    Parameters
+    ----------
+    mgf_file : PathLike
+        Path to the MGF file.
+    indices : set[int], optional
+        If provided, only spectra at these 0-based positions are retained and
+        iteration stops as soon as all requested indices have been collected.
+        If ``None`` (default), every spectrum is loaded.
+    """
     result: dict[int, dict] = {}
     with pyteomics.mgf.read(str(mgf_file), use_index=False) as reader:
         for i, spectrum in enumerate(
             tqdm.tqdm(reader, desc="Loading MGF peaks", unit="spectrum")
         ):
-            result[i] = spectrum
+            if indices is None or i in indices:
+                result[i] = spectrum
+            if indices is not None and len(result) == len(indices):
+                break
     return result
 
 
@@ -257,6 +272,8 @@ def visualize_errors(
             f"{output_dir} already contains {len(existing_pngs)} rank_*.png "
             "file(s) from a previous run. Use --overwrite to replace them."
         )
+    for png in existing_pngs:
+        png.unlink()
 
     log_path = output_dir / "visualize_errors.log"
     file_handler = configure_logging(log_path)
@@ -293,6 +310,34 @@ def visualize_errors(
         # ── 2. Mass-based correctness ─────────────────────────────────────────
         pc_df = calc_precision_coverage(pc_df, Constants.pep_score_column)
 
+        # When distinct_il=True, mass-based matching cannot distinguish I from L
+        # (both have mass 113.084 Da).  Apply a string-level post-pass: any row
+        # that mass-matching marked correct but whose token lists differ by an
+        # I/L swap is re-labelled as incorrect.
+        if distinct_il:
+            _il = frozenset({"I", "L"})
+
+            def _has_il_swap(pred: list[str], gt: list[str]) -> bool:
+                if len(pred) != len(gt):
+                    return False
+                return any(
+                    p != g and frozenset({p, g}) == _il for p, g in zip(pred, gt)
+                )
+
+            pc_df = pc_df.with_columns(
+                pl.Series(
+                    "pc_is_correct",
+                    [
+                        c and not _has_il_swap(p, g)
+                        for c, p, g in zip(
+                            pc_df["pc_is_correct"].to_list(),
+                            pc_df[Constants.predicted_tokens].to_list(),
+                            pc_df[Constants.ground_truth_tokens].to_list(),
+                        )
+                    ],
+                )
+            )
+
         n_total = len(pc_df)
         n_wrong = int((~pc_df["pc_is_correct"]).sum())
         logging.info("%d / %d predictions are incorrect", n_wrong, n_total)
@@ -311,10 +356,18 @@ def visualize_errors(
         logging.info("Plotting top %d of %d incorrect spectra", len(wrong_df), n_wrong)
 
         # ── 4. Load raw peak arrays indexed by MGF position ─────────────────
-        mgf_peaks = _load_mgf_peaks(mgf_file)
+        # Collect only the MGF indices referenced by the wrong spectra so we
+        # avoid reading the entire (potentially large) MGF into memory.
+        needed_indices: set[int] = set()
+        spectra_ref_col = "mztab_spectra_ref"
+        if spectra_ref_col in wrong_df.columns:
+            for ref_val in wrong_df[spectra_ref_col].to_list():
+                idx = _parse_mgf_idx(str(ref_val or ""))
+                if idx is not None:
+                    needed_indices.add(idx)
+        mgf_peaks = _load_mgf_peaks(mgf_file, needed_indices or None)
 
         # ── 5. One mirror plot per spectrum ──────────────────────────────────
-        spectra_ref_col = "mztab_spectra_ref"
         has_ref = spectra_ref_col in wrong_df.columns
 
         plotted = 0
