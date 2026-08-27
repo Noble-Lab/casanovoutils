@@ -253,34 +253,25 @@ def test_results_html_links_to_main_html(tmp_path):
     assert "out.html" in results_text
 
 
+_DUMMY_STATS = dict(
+    mgf_file="input.mgf",
+    mztab_file="input.mztab",
+    n_total=100,
+    n_with_predictions=80,
+    n_correct=60,
+)
+
+
 def test_results_html_accumulates_runs(tmp_path):
-    """A second run with a different output_dir appends to the same results.html."""
-    out_a = tmp_path / "run_a"
-    out_b = tmp_path / "run_b"
-    # Run A writes results.html; run B should append to it.
-    # We fake this by sharing the same parent but using _write_html directly.
-    out_a.mkdir()
-    out_b.mkdir()
-    png_a = out_a / "rank_0001_scan_1.png"
-    png_b = out_b / "rank_0001_scan_2.png"
-    png_a.touch()
-    png_b.touch()
-
-    # Simulate two runs writing into the same parent's results.html by using
-    # the same directory for both (which is what the user requested).
-    results = tmp_path / "results.html"
-    _write_html.__module__  # ensure imported
-
-    import pathlib as _pl
-
+    """A second call to _write_html appends a new entry to results.html."""
     shared = tmp_path / "shared"
     shared.mkdir()
     p1 = shared / "rank_0001_scan_1.png"
     p2 = shared / "rank_0002_scan_2.png"
     p1.touch()
     p2.touch()
-    _write_html(shared, [p1])
-    _write_html(shared, [p1, p2])  # second call appends to results.html
+    _write_html(shared, [p1], **_DUMMY_STATS)
+    _write_html(shared, [p1, p2], **_DUMMY_STATS)  # second call appends
 
     results_text = (shared / "results.html").read_text(encoding="utf-8")
     # The link should appear twice (once per call).
@@ -294,9 +285,32 @@ def test_write_html_standalone(tmp_path):
     pngs = [d / "rank_0001_scan_6.png", d / "rank_0002_scan_91.png"]
     for p in pngs:
         p.touch()
-    _write_html(d, pngs)
+    _write_html(d, pngs, **_DUMMY_STATS)
     assert (d / "myrun.html").exists()
     assert (d / "results.html").exists()
     html = (d / "myrun.html").read_text(encoding="utf-8")
     assert "rank_0001_scan_6.png" in html
     assert "rank_0002_scan_91.png" in html
+
+
+def test_results_html_contains_stats(tmp_path):
+    """results.html entry includes input files and prediction counts."""
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    text = (out / "results.html").read_text(encoding="utf-8")
+    assert str(TEST_MGF) in text
+    assert str(TEST_MZTAB) in text
+    # Should mention totals (exact numbers will vary, just check labels present)
+    assert "Total spectra" in text
+    assert "With Casanovo predictions" in text
+    assert "Correct predictions" in text
+
+
+def test_main_html_contains_stats(tmp_path):
+    """<stem>.html also includes the summary table."""
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    text = (out / "out.html").read_text(encoding="utf-8")
+    assert "Total spectra" in text
+    assert "With Casanovo predictions" in text
+    assert "Correct predictions" in text

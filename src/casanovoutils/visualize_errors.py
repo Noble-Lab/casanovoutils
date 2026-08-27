@@ -199,7 +199,13 @@ def _parse_mgf_idx(spectra_ref: str) -> Optional[int]:
 
 
 def _write_html(
-    output_dir: pathlib.Path, png_paths: list[pathlib.Path]
+    output_dir: pathlib.Path,
+    png_paths: list[pathlib.Path],
+    mgf_file: PathLike,
+    mztab_file: PathLike,
+    n_total: int,
+    n_with_predictions: int,
+    n_correct: int,
 ) -> pathlib.Path:
     """Write <stem>.html linking to all PNGs, and update results.html.
 
@@ -209,6 +215,16 @@ def _write_html(
         Directory that contains the PNG files.
     png_paths : list[pathlib.Path]
         Ordered list of PNG files to link (relative names are used).
+    mgf_file : PathLike
+        Path to the input MGF file (displayed in the header).
+    mztab_file : PathLike
+        Path to the input mzTab file (displayed in the header).
+    n_total : int
+        Total number of spectra in the MGF file.
+    n_with_predictions : int
+        Number of spectra that have a corresponding Casanovo prediction.
+    n_correct : int
+        Number of predictions that are correct (mass-based matching).
 
     Returns
     -------
@@ -216,6 +232,23 @@ def _write_html(
         Path to the written ``<stem>.html`` file.
     """
     stem = output_dir.name
+    pct_correct = (
+        f"{100.0 * n_correct / n_with_predictions:.1f}" if n_with_predictions else "N/A"
+    )
+
+    # ── summary block (shared by both HTML files) ─────────────────────────────
+    summary_html = f"""<table>
+<tr><th style="text-align:left">MGF file</th>
+    <td><code>{html_mod.escape(str(mgf_file))}</code></td></tr>
+<tr><th style="text-align:left">mzTab file</th>
+    <td><code>{html_mod.escape(str(mztab_file))}</code></td></tr>
+<tr><th style="text-align:left">Total spectra</th>
+    <td>{n_total}</td></tr>
+<tr><th style="text-align:left">With Casanovo predictions</th>
+    <td>{n_with_predictions}</td></tr>
+<tr><th style="text-align:left">Correct predictions</th>
+    <td>{n_correct} ({pct_correct}%)</td></tr>
+</table>"""
 
     # ── <stem>.html ───────────────────────────────────────────────────────────
     items = "\n".join(
@@ -228,10 +261,16 @@ def _write_html(
 <html lang="en">
 <head><meta charset="utf-8">
 <title>{html_mod.escape(stem)}</title>
-<style>body{{font-family:sans-serif}} ul{{list-style:none;padding:0}} li{{margin:1em 0}}</style>
+<style>
+body{{font-family:sans-serif}}
+table{{border-collapse:collapse;margin-bottom:1em}}
+th,td{{padding:0.3em 0.8em;border:1px solid #ccc}}
+ul{{list-style:none;padding:0}} li{{margin:1em 0}}
+</style>
 </head>
 <body>
 <h1>{html_mod.escape(stem)}</h1>
+{summary_html}
 <ul>
 {items}
 </ul>
@@ -244,28 +283,33 @@ def _write_html(
 
     # ── results.html ──────────────────────────────────────────────────────────
     results_path = output_dir / "results.html"
-    link_line = (
-        f'<li><a href="{html_mod.escape(stem + ".html")}">'
-        f"{html_mod.escape(stem)}</a></li>"
+    entry = (
+        f"<li>\n"
+        f'<a href="{html_mod.escape(stem + ".html")}">{html_mod.escape(stem)}</a>\n'
+        f"{summary_html}\n"
+        f"</li>"
     )
     if results_path.exists():
         text = results_path.read_text(encoding="utf-8")
-        # Insert before the closing </ul> if already an index, else append.
         if "</ul>" in text:
-            text = text.replace("</ul>", f"{link_line}\n</ul>", 1)
+            text = text.replace("</ul>", f"{entry}\n</ul>", 1)
         else:
-            text += f"\n{link_line}\n"
+            text += f"\n{entry}\n"
         results_path.write_text(text, encoding="utf-8")
     else:
         results_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Results</title>
-<style>body{{font-family:sans-serif}}</style>
+<style>
+body{{font-family:sans-serif}}
+table{{border-collapse:collapse;margin:0.5em 0 0.5em 1em}}
+th,td{{padding:0.3em 0.8em;border:1px solid #ccc}}
+</style>
 </head>
 <body>
 <h1>Results</h1>
 <ul>
-{link_line}
+{entry}
 </ul>
 </body>
 </html>"""
@@ -392,6 +436,9 @@ def visualize_errors(
                 pc_df = pc_df.drop(Constants.aa_scores_column)
             pc_df = pc_df.rename({aa_col: Constants.aa_scores_column})
 
+        # Count spectra with a prediction before nulls are filled with "".
+        n_with_predictions = int(pc_df[pred_col].is_not_null().sum())
+
         pc_df = fill_null_columns(pc_df, pred_col)
         pc_df = tokenize_and_parse_scores(
             pc_df,
@@ -432,7 +479,8 @@ def visualize_errors(
             )
 
         n_total = len(pc_df)
-        n_wrong = int((~pc_df["pc_is_correct"]).sum())
+        n_correct = int(pc_df["pc_is_correct"].sum())
+        n_wrong = n_total - n_correct
         logging.info("%d / %d predictions are incorrect", n_wrong, n_total)
 
         # ── 3. Top-k incorrect by descending score ───────────────────────────
@@ -521,7 +569,15 @@ def visualize_errors(
             plotted += 1
 
         if saved_pngs:
-            _write_html(output_dir, saved_pngs)
+            _write_html(
+                output_dir,
+                saved_pngs,
+                mgf_file=mgf_file,
+                mztab_file=mztab_file,
+                n_total=n_total,
+                n_with_predictions=n_with_predictions,
+                n_correct=n_correct,
+            )
 
         logging.info("Done. %d plots written to %s", plotted, output_dir)
 
