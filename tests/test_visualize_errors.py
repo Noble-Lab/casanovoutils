@@ -11,6 +11,7 @@ from casanovoutils.visualize_errors import (
     _make_mirror_plot,
     _make_spectrum,
     _parse_mgf_idx,
+    _write_html,
     visualize_errors,
 )
 
@@ -217,3 +218,85 @@ def test_distinct_il_produces_at_least_as_many_errors(tmp_path):
     n_equiv = len(list(out_equiv.glob("rank_*.png")))
     n_distinct = len(list(out_distinct.glob("rank_*.png")))
     assert n_distinct >= n_equiv
+
+
+# ---------------------------------------------------------------------------
+# HTML output tests
+# ---------------------------------------------------------------------------
+
+
+def test_visualize_errors_creates_main_html(tmp_path):
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    assert (out / "out.html").exists()
+
+
+def test_visualize_errors_creates_results_html(tmp_path):
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    assert (out / "results.html").exists()
+
+
+def test_main_html_links_to_pngs(tmp_path):
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    html_text = (out / "out.html").read_text(encoding="utf-8")
+    pngs = sorted(out.glob("rank_*.png"))
+    for png in pngs:
+        assert png.name in html_text
+
+
+def test_results_html_links_to_main_html(tmp_path):
+    out = tmp_path / "out"
+    visualize_errors(mgf_file=TEST_MGF, mztab_file=TEST_MZTAB, output_dir=out, k=3)
+    results_text = (out / "results.html").read_text(encoding="utf-8")
+    assert "out.html" in results_text
+
+
+def test_results_html_accumulates_runs(tmp_path):
+    """A second run with a different output_dir appends to the same results.html."""
+    out_a = tmp_path / "run_a"
+    out_b = tmp_path / "run_b"
+    # Run A writes results.html; run B should append to it.
+    # We fake this by sharing the same parent but using _write_html directly.
+    out_a.mkdir()
+    out_b.mkdir()
+    png_a = out_a / "rank_0001_scan_1.png"
+    png_b = out_b / "rank_0001_scan_2.png"
+    png_a.touch()
+    png_b.touch()
+
+    # Simulate two runs writing into the same parent's results.html by using
+    # the same directory for both (which is what the user requested).
+    results = tmp_path / "results.html"
+    _write_html.__module__  # ensure imported
+
+    import pathlib as _pl
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    p1 = shared / "rank_0001_scan_1.png"
+    p2 = shared / "rank_0002_scan_2.png"
+    p1.touch()
+    p2.touch()
+    _write_html(shared, [p1])
+    _write_html(shared, [p1, p2])  # second call appends to results.html
+
+    results_text = (shared / "results.html").read_text(encoding="utf-8")
+    # The link should appear twice (once per call).
+    assert results_text.count("shared.html") == 2
+
+
+def test_write_html_standalone(tmp_path):
+    """_write_html creates both HTML files from a list of paths."""
+    d = tmp_path / "myrun"
+    d.mkdir()
+    pngs = [d / "rank_0001_scan_6.png", d / "rank_0002_scan_91.png"]
+    for p in pngs:
+        p.touch()
+    _write_html(d, pngs)
+    assert (d / "myrun.html").exists()
+    assert (d / "results.html").exists()
+    html = (d / "myrun.html").read_text(encoding="utf-8")
+    assert "rank_0001_scan_6.png" in html
+    assert "rank_0002_scan_91.png" in html

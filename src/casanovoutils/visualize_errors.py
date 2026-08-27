@@ -8,6 +8,7 @@ sequence; the bottom (mirrored) panel annotates the same spectrum with the
 mzTab fields (score, charge, precursor m/z, Δm/z in Da and ppm, scan number).
 """
 
+import html as html_mod
 import logging
 import pathlib
 import sys
@@ -197,6 +198,83 @@ def _parse_mgf_idx(spectra_ref: str) -> Optional[int]:
     return None
 
 
+def _write_html(
+    output_dir: pathlib.Path, png_paths: list[pathlib.Path]
+) -> pathlib.Path:
+    """Write <stem>.html linking to all PNGs, and update results.html.
+
+    Parameters
+    ----------
+    output_dir : pathlib.Path
+        Directory that contains the PNG files.
+    png_paths : list[pathlib.Path]
+        Ordered list of PNG files to link (relative names are used).
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the written ``<stem>.html`` file.
+    """
+    stem = output_dir.name
+
+    # ── <stem>.html ───────────────────────────────────────────────────────────
+    items = "\n".join(
+        f'    <li><a href="{html_mod.escape(p.name)}">'
+        f'<img src="{html_mod.escape(p.name)}" '
+        f'alt="{html_mod.escape(p.stem)}" width="800"></a></li>'
+        for p in png_paths
+    )
+    main_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8">
+<title>{html_mod.escape(stem)}</title>
+<style>body{{font-family:sans-serif}} ul{{list-style:none;padding:0}} li{{margin:1em 0}}</style>
+</head>
+<body>
+<h1>{html_mod.escape(stem)}</h1>
+<ul>
+{items}
+</ul>
+</body>
+</html>"""
+
+    main_path = output_dir / f"{stem}.html"
+    main_path.write_text(main_html, encoding="utf-8")
+    logging.info("Wrote %s", main_path)
+
+    # ── results.html ──────────────────────────────────────────────────────────
+    results_path = output_dir / "results.html"
+    link_line = (
+        f'<li><a href="{html_mod.escape(stem + ".html")}">'
+        f"{html_mod.escape(stem)}</a></li>"
+    )
+    if results_path.exists():
+        text = results_path.read_text(encoding="utf-8")
+        # Insert before the closing </ul> if already an index, else append.
+        if "</ul>" in text:
+            text = text.replace("</ul>", f"{link_line}\n</ul>", 1)
+        else:
+            text += f"\n{link_line}\n"
+        results_path.write_text(text, encoding="utf-8")
+    else:
+        results_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Results</title>
+<style>body{{font-family:sans-serif}}</style>
+</head>
+<body>
+<h1>Results</h1>
+<ul>
+{link_line}
+</ul>
+</body>
+</html>"""
+        results_path.write_text(results_html, encoding="utf-8")
+    logging.info("Wrote %s", results_path)
+
+    return main_path
+
+
 # ---------------------------------------------------------------------------
 # Public command
 # ---------------------------------------------------------------------------
@@ -262,6 +340,21 @@ def visualize_errors(
     residues_path : PathLike, optional
         Path to a custom residue mass YAML file.  If ``None``, the bundled
         ``residues.yaml`` is used.
+
+    Output files
+    ------------
+    ``<output_dir>/<stem>.html``
+        Primary output.  An HTML page with inline ``<img>`` links to every
+        generated PNG, where *stem* is the final component of *output_dir*
+        (e.g. ``visualize_errors/visualize_errors.html``).
+    ``<output_dir>/results.html``
+        Top-level index page.  Created on first run; on subsequent runs the
+        link to ``<stem>.html`` is appended to the existing ``<ul>`` list so
+        that results from multiple runs accumulate in one place.
+    ``<output_dir>/rank_NNNN_scan_S.png``
+        One mirror plot per incorrect spectrum, named by rank and scan number.
+    ``<output_dir>/visualize_errors.log``
+        Run log.
     """
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -371,6 +464,7 @@ def visualize_errors(
         has_ref = spectra_ref_col in wrong_df.columns
 
         plotted = 0
+        saved_pngs: list[pathlib.Path] = []
         for rank, row in enumerate(wrong_df.iter_rows(named=True), start=1):
             predicted_seq = row.get(pred_col) or ""
             ground_truth_seq = row.get(Constants.ground_truth_sequence_column) or ""
@@ -423,7 +517,11 @@ def visualize_errors(
             fig.savefig(out_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             logging.info("Saved %s", out_path)
+            saved_pngs.append(out_path)
             plotted += 1
+
+        if saved_pngs:
+            _write_html(output_dir, saved_pngs)
 
         logging.info("Done. %d plots written to %s", plotted, output_dir)
 
