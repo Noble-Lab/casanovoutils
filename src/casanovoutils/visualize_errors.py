@@ -207,7 +207,7 @@ def _write_html(
     n_with_predictions: int,
     n_correct: int,
 ) -> pathlib.Path:
-    """Write <stem>.html linking to all PNGs, and update results.html.
+    """Write <stem>.html linking to all PNGs with a summary header.
 
     Parameters
     ----------
@@ -236,7 +236,6 @@ def _write_html(
         f"{100.0 * n_correct / n_with_predictions:.1f}" if n_with_predictions else "N/A"
     )
 
-    # ── summary block (shared by both HTML files) ─────────────────────────────
     summary_html = f"""<table>
 <tr><th style="text-align:left">MGF file</th>
     <td><code>{html_mod.escape(str(mgf_file))}</code></td></tr>
@@ -250,7 +249,6 @@ def _write_html(
     <td>{n_correct} ({pct_correct}%)</td></tr>
 </table>"""
 
-    # ── <stem>.html ───────────────────────────────────────────────────────────
     items = "\n".join(
         f'    <li><a href="{html_mod.escape(p.name)}">'
         f'<img src="{html_mod.escape(p.name)}" '
@@ -280,42 +278,6 @@ ul{{list-style:none;padding:0}} li{{margin:1em 0}}
     main_path = output_dir / f"{stem}.html"
     main_path.write_text(main_html, encoding="utf-8")
     logging.info("Wrote %s", main_path)
-
-    # ── results.html ──────────────────────────────────────────────────────────
-    results_path = output_dir / "results.html"
-    entry = (
-        f"<li>\n"
-        f'<a href="{html_mod.escape(stem + ".html")}">{html_mod.escape(stem)}</a>\n'
-        f"{summary_html}\n"
-        f"</li>"
-    )
-    if results_path.exists():
-        text = results_path.read_text(encoding="utf-8")
-        if "</ul>" in text:
-            text = text.replace("</ul>", f"{entry}\n</ul>", 1)
-        else:
-            text += f"\n{entry}\n"
-        results_path.write_text(text, encoding="utf-8")
-    else:
-        results_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Results</title>
-<style>
-body{{font-family:sans-serif}}
-table{{border-collapse:collapse;margin:0.5em 0 0.5em 1em}}
-th,td{{padding:0.3em 0.8em;border:1px solid #ccc}}
-</style>
-</head>
-<body>
-<h1>Results</h1>
-<ul>
-{entry}
-</ul>
-</body>
-</html>"""
-        results_path.write_text(results_html, encoding="utf-8")
-    logging.info("Wrote %s", results_path)
-
     return main_path
 
 
@@ -388,13 +350,10 @@ def visualize_errors(
     Output files
     ------------
     ``<output_dir>/<stem>.html``
-        Primary output.  An HTML page with inline ``<img>`` links to every
-        generated PNG, where *stem* is the final component of *output_dir*
-        (e.g. ``visualize_errors/visualize_errors.html``).
-    ``<output_dir>/results.html``
-        Top-level index page.  Created on first run; on subsequent runs the
-        link to ``<stem>.html`` is appended to the existing ``<ul>`` list so
-        that results from multiple runs accumulate in one place.
+        Primary output.  An HTML page with a summary table (input files,
+        spectrum counts, prediction accuracy) followed by inline ``<img>``
+        links to every generated PNG, where *stem* is the final component
+        of *output_dir* (e.g. ``visualize_errors/visualize_errors.html``).
     ``<output_dir>/rank_NNNN_scan_S.png``
         One mirror plot per incorrect spectrum, named by rank and scan number.
     ``<output_dir>/visualize_errors.log``
