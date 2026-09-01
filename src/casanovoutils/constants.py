@@ -24,6 +24,8 @@ class Constants:
     coverage_column : str
         Name of the column holding cumulative coverage values computed
         by ``calc_precision_coverage``.
+    proforma_column : str
+        Name of the mzTab column holding the ProForma peptidoform sequence.
     min_score : float
         Sentinel score assigned to gap positions during sequence alignment.
     """
@@ -34,6 +36,9 @@ class Constants:
     aa_idx_column: str = "pc_aa_idx"
     precision_column: str = "pc_precision"
     coverage_column: str = "pc_coverage"
+    proforma_column: str = (
+        "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"
+    )
     predicted_tokens: str = "mztab_tokens"
     ground_truth_tokens: str = "mgf_tokens"
     min_score: float = -1.0
