@@ -12,7 +12,14 @@ class Constants:
     ground_truth_sequence_column : str
         Name of the column holding ground truth peptide sequences.
     aa_scores_column : str
-        Name of the column holding per-amino-acid score strings.
+        Canonical name of the column holding per-amino-acid score strings
+        (``"mztab_opt_global_aa_scores"``).  Use
+        :meth:`get_aa_scores_column` to detect whichever variant is
+        present in a DataFrame loaded from an mzTab file.
+    aa_scores_column_legacy : str
+        Legacy column name emitted by older versions of pyteomics
+        (``"mztab_opt_ms_run[1]_aa_scores"``), kept for backwards
+        compatibility with code that referenced the old constant value.
     pep_score_column : str
         Name of the column holding peptide-level search engine scores.
     aa_idx_column : str
@@ -29,7 +36,8 @@ class Constants:
     """
 
     ground_truth_sequence_column: str = "mgf_seq"
-    aa_scores_column: str = "mztab_opt_ms_run[1]_aa_scores"
+    aa_scores_column: str = "mztab_opt_global_aa_scores"
+    aa_scores_column_legacy: str = "mztab_opt_ms_run[1]_aa_scores"
     pep_score_column: str = "mztab_search_engine_score[1]"
     aa_idx_column: str = "pc_aa_idx"
     precision_column: str = "pc_precision"
@@ -39,27 +47,73 @@ class Constants:
     min_score: float = -1.0
 
     @staticmethod
-    def get_pred_sequence_column(df: pl.DataFrame) -> str:
+    def get_aa_scores_column(df: pl.DataFrame) -> str:
         """
-        Determine the name of the predicted sequence column.
+        Determine the name of the per-amino-acid scores column.
 
-        Checks for the presence of a ProForma-formatted prediction column first,
-        falling back to the plain mzTab sequence column if it is absent.
+        The mzTab spec requires optional columns that apply globally to be named
+        ``opt_global_*``.  Older versions of pyteomics incorrectly expanded these
+        to ``opt_ms_run[1]_*``; newer versions preserve the spec-correct name.
+        This method checks for both conventions so that casanovoutils works
+        regardless of the pyteomics version used to read the mzTab file.
 
         Parameters
         ----------
         df : pl.DataFrame
-            A DataFrame expected to contain either
-            ``"mztab_opt_ms_run[1]_proforma"`` or ``"mztab_sequence"``.
+            A DataFrame expected to contain the per-amino-acid scores column.
+
+        Returns
+        -------
+        str
+            The name of the per-amino-acid scores column present in *df*.
+
+        Raises
+        ------
+        ValueError
+            If neither :attr:`aa_scores_column` nor
+            :attr:`aa_scores_column_legacy` is found in *df*.
+        """
+        if Constants.aa_scores_column in df.columns:
+            return Constants.aa_scores_column
+        if Constants.aa_scores_column_legacy in df.columns:
+            return Constants.aa_scores_column_legacy
+        raise ValueError(
+            "Cannot find per-amino-acid scores column in DataFrame. "
+            f"Expected '{Constants.aa_scores_column}' (mzTab spec opt_global_* name, "
+            f"current pyteomics) or '{Constants.aa_scores_column_legacy}' "
+            "(legacy opt_ms_run[1]_* expansion from older pyteomics). "
+            f"Found columns: {df.columns}"
+        )
+
+    @staticmethod
+    def get_pred_sequence_column(df: pl.DataFrame) -> str:
+        """
+        Determine the name of the predicted sequence column.
+
+        Checks for ProForma-formatted prediction columns first (preferred,
+        because they carry modification annotations), falling back to the
+        plain mzTab sequence column if none is found.
+
+        Two ProForma column naming conventions are supported:
+
+        - ``"mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"``
+          — written by current Casanovo (uses the CV-term name and the
+          spec-correct ``opt_global_*`` prefix).
+        - ``"mztab_opt_ms_run[1]_proforma"`` — written by older Casanovo
+          versions.
+
+        Parameters
+        ----------
+        df : pl.DataFrame
+            A DataFrame expected to contain a predicted sequence column.
 
         Returns
         -------
         str
             The name of the predicted sequence column.
         """
+        if "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence" in df.columns:
+            return "mztab_opt_global_cv_MS:1003169_proforma_peptidoform_sequence"
         if "mztab_opt_ms_run[1]_proforma" in df.columns:
-            pred_col = "mztab_opt_ms_run[1]_proforma"
-        else:
-            pred_col = "mztab_sequence"
-
-        return pred_col
+            return "mztab_opt_ms_run[1]_proforma"
+        return "mztab_sequence"
