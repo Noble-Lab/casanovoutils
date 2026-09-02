@@ -836,7 +836,9 @@ def create_datasets(
     try:
         random.seed(random_seed)
 
-        with tempfile.TemporaryDirectory(dir=tmp_dir, ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory(
+            dir=tmp_dir, ignore_cleanup_errors=True
+        ) as tmpdir:
             tmp = pathlib.Path(tmpdir)
             if mskb_format:
                 converted = []
