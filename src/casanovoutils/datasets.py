@@ -231,6 +231,8 @@ def _assign_splits(
     total_spectra: int,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     spectra_per_precursor: Optional[int],
+    val_fraction: float = 0.1,
+    test_fraction: float = 0.1,
 ) -> tuple[dict[str, str], dict[tuple, set[int]], dict[str, set[str]]]:
     """Compute per-peptide split assignments and sampling indices.
 
@@ -250,6 +252,10 @@ def _assign_splits(
         Paths to existing train/val/test MGF files, or None.
     spectra_per_precursor : int or None
         Maximum spectra to retain per (peptide, charge state), or None.
+    val_fraction : float, default=0.1
+        Target fraction of peptides to assign to the validation set.
+    test_fraction : float, default=0.1
+        Target fraction of peptides to assign to the test set.
 
     Returns
     -------
@@ -380,7 +386,7 @@ def _assign_splits(
     random.shuffle(new_peptides)
 
     if existing_splits is not None:
-        # Distribute new peptides to reach 80/10/10 overall,
+        # Distribute new peptides to reach target fractions overall,
         # counting ALL existing peptides (not just overlapping ones).
         total_peptides = (
             len(existing_peps["train"])
@@ -389,8 +395,8 @@ def _assign_splits(
             + len(new_peptides)
         )
         if total_peptides >= 3:
-            target_val = max(1, round(total_peptides * 0.1))
-            target_test = max(1, round(total_peptides * 0.1))
+            target_val = max(1, round(total_peptides * val_fraction))
+            target_test = max(1, round(total_peptides * test_fraction))
             target_train = total_peptides - target_val - target_test
         else:
             logging.warning(
@@ -398,8 +404,9 @@ def _assign_splits(
                 f"new data ({total_peptides} peptides). One or more of "
                 f"the train/validation/test splits may be empty."
             )
-            target_train = round(total_peptides * 0.8)
-            target_val = round(total_peptides * 0.1)
+            train_fraction = 1.0 - val_fraction - test_fraction
+            target_train = round(total_peptides * train_fraction)
+            target_val = round(total_peptides * val_fraction)
             target_test = total_peptides - target_train - target_val
 
         need_train = max(0, target_train - len(existing_peps["train"]))
@@ -452,8 +459,8 @@ def _assign_splits(
             val_peps = []
             test_peps = []
         else:
-            n_val = max(1, round(n * 0.1))
-            n_test = max(1, round(n * 0.1))
+            n_val = max(1, round(n * val_fraction))
+            n_test = max(1, round(n * test_fraction))
             n_train = n - n_val - n_test
 
             train_peps = new_peptides[:n_train]
@@ -715,14 +722,16 @@ def create_datasets(
     mskb_format: bool = False,
     casanovo_config: Optional[PathLike] = None,
     tmp_dir: Optional[PathLike] = None,
+    val_fraction: float = 0.1,
+    test_fraction: float = 0.1,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
     All spectra from the input MGF files are combined and grouped by peptide
-    sequence. The unique peptides are randomly split into training (80%),
-    validation (10%), and test (10%) sets. Spectra are then assigned to splits
-    based on their associated peptide, ensuring no peptide-level leakage
-    between splits.
+    sequence. The unique peptides are randomly split into training, validation,
+    and test sets according to ``val_fraction`` and ``test_fraction`` (defaulting
+    to 80/10/10). Spectra are then assigned to splits based on their associated
+    peptide, ensuring no peptide-level leakage between splits.
 
     Several pairs of residues are indistinguishable by mass spectrometry and
     are always grouped together during splitting to prevent leakage:
@@ -796,6 +805,11 @@ def create_datasets(
         Defaults to the system temporary directory (usually ``/tmp``). Set
         this to a directory on a volume with sufficient free space when
         processing large MGF files.
+    val_fraction : float, default=0.1
+        Target fraction of unique peptides to assign to the validation set.
+    test_fraction : float, default=0.1
+        Target fraction of unique peptides to assign to the test set.
+        The training fraction is implicitly ``1 - val_fraction - test_fraction``.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
@@ -863,6 +877,8 @@ def create_datasets(
                 total_spectra,
                 existing_splits,
                 spectra_per_precursor,
+                val_fraction=val_fraction,
+                test_fraction=test_fraction,
             )
 
             split_spectra_counts, split_pep_sets, mod_to_bare_by_split = _write_splits(
