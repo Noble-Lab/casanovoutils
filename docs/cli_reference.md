@@ -458,6 +458,9 @@ The following output files are written:
 | `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
 | `--combine_with_existing` | bool | `False` | Include existing spectra in output alongside new ones |
 | `--mskb_format` | bool | `False` | Convert input sequences from MassIVE-KB PTM notation to ProForma before splitting |
+| `--casanovo_config` | PathLike | `None | Filters spectra based on thresholds in the config (``residues``, ``min_peaks``, ``max_charge``, and
+        ``replace_isoleucine_with_leucine``) |
+| `--tmp_dir` | PathLike | `None` | Directory to store temporary files | 
 
 **Examples:**
 
