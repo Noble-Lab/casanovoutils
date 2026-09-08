@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added flag to convert sequences from MassIVE-KB PTM notation to ProForma before
+  splitting in `casanovoutils datasets`
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
   in a single command with each stage independently optional.
 - `casanovoutils mgf purge-redundant`: remove near-duplicate peaks within each
@@ -18,6 +20,7 @@
 
 ### Changed
 
+- Improved logging detail in `casanovoutils datasets`
 - All CLI entry points consolidated into a single `casanovoutils` command with
   nested subcommands (`mgf`, `denovo`, `dump-residues`). The previous separate
   entry points (`graph-prec-cov`, `downsample-ms`, `mgf-utils`,
