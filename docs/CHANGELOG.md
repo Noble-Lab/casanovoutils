@@ -17,7 +17,9 @@
   preventing duplicate handler registration when functions are composed.
 
 ### Changed
-
+- `casanovoutils mgfutils shuffle` was sped up with raw text IO. When the input
+  is file paths, a raw text IO fast path is used and otherwise the pyteomics
+  serialize method is used.
 - All CLI entry points consolidated into a single `casanovoutils` command with
   nested subcommands (`mgf`, `denovo`, `dump-residues`). The previous separate
   entry points (`graph-prec-cov`, `downsample-ms`, `mgf-utils`,
