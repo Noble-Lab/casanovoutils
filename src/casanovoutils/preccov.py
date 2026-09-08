@@ -283,9 +283,13 @@ def _aa_match_prefix(
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            # Require both tokens to be known residues to count as a match;
-            # unknown tokens (mass defaulting to 0.0) must not match each other.
-            aa_matches[max(i1, i2)] = (
+            # Two tokens match when they are string-equal (handles compound
+            # N-terminal tokens like "[Acetyl]-A" that are absent from aa_dict)
+            # OR when both are known residues whose masses agree within tolerance.
+            # Unknown tokens that differ must not match each other (e.g. "B" vs
+            # "X" both have mass 0.0 but are different residues).
+            same_token = peptide1[i1] == peptide2[i2]
+            aa_matches[max(i1, i2)] = same_token or (
                 m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
             )
             i1, i2 = i1 + 1, i2 + 1
@@ -324,7 +328,8 @@ def _aa_match_prefix_suffix(
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            aa_matches[max(i1, i2)] = (
+            same_token = peptide1[i1] == peptide2[i2]
+            aa_matches[max(i1, i2)] = same_token or (
                 m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
             )
             i1, i2 = i1 - 1, i2 - 1

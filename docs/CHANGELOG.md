@@ -4,6 +4,8 @@
 
 ### Added
 
+- `casanovoutils visualize_errors`: creates mirror plots of the top scoring
+  incorrect predictions at the peptide level
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
   in a single command with each stage independently optional.
 - `casanovoutils mgf purge-redundant`: remove near-duplicate peaks within each
