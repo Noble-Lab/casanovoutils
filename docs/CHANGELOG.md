@@ -4,6 +4,10 @@
 
 ### Added
 
+- `--casanovo_config` and `--tmp_dir` were added as flags for `casanovoutils
+  datasets`. If used, `--casanovo_config`` filters spectra based on `min_peaks`,
+  `max_charge`, `residues`, and `replace_isoleucine_with_leucine` in the config.
+  `--tmp_dir` is the directory to store temporary converted and filtered MGFs.
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
   in a single command with each stage independently optional.
 - `casanovoutils mgf purge-redundant`: remove near-duplicate peaks within each
