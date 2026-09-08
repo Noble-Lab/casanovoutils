@@ -60,8 +60,8 @@ its enabling parameter is omitted.
 **Examples:**
 
 ```bash
-# Shuffle only
-casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle False
+# Shuffle only (default; no extra flags needed)
+casanovoutils mgfutils pipeline input.mgf --outfile out.mgf
 
 # Cap at 2 spectra per peptide, no shuffle
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle --downsample_k 2
@@ -100,6 +100,8 @@ Reservoir-sample up to `k` spectra per peptide in a single streaming pass.
 | `spectra` | path | required | Input MGF file path |
 | `--k` | int | `1` | Maximum spectra per peptide |
 | `--outfile` | path | `None` | Output MGF file path |
+| `--precursor` | bool | `False` | Group by peptide sequence *and* charge state (same peptide in different charge states treated as separate groups) |
+| `--ignore_mods` | bool | `False` | Strip ProForma bracketed modification annotations before grouping (modified and unmodified forms counted together) |
 | `--random_seed` | int | `42` | Random seed for reproducibility |
 
 **Example:**
