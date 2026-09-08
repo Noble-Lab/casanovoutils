@@ -18,6 +18,10 @@
 
 ### Changed
 
+- Renamed `mgf` to `mgfutils`. Existing commands such as
+  `casanovoutils mgf shuffle` should now be invoked as
+  `casanovoutils mgfutils shuffle`.
+- Removed `downsample` subcommand under `mgfutils`
 - All CLI entry points consolidated into a single `casanovoutils` command with
   nested subcommands (`mgf`, `denovo`, `dump-residues`). The previous separate
   entry points (`graph-prec-cov`, `downsample-ms`, `mgf-utils`,

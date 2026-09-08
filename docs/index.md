@@ -8,9 +8,9 @@ state-of-the-art de novo peptide sequencing tool, and works directly with
 
 ## Key capabilities
 
-- **MGF processing pipeline** — shuffle, downsample by peptide sequence, and
+- **MGF processing pipeline** — shuffle, downsample by peptide sequence using spectra-per-peptide, and
   purge near-duplicate peaks, either as individual steps or chained together
-  via the `casanovoutils mgf pipeline` command.
+  via the `casanovoutils mgfutils pipeline` command.
 
 - **mzML sampling** — stream-sample a proportion of spectra from mzML files
   in a single pass using per-buffer random sampling, writing output as MGF

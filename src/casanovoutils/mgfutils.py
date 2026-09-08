@@ -1,10 +1,12 @@
 """
 Utilities for reading, writing, and processing MGF spectrum files.
 
-Provides functions to iterate over spectra from MGF files or in-memory
-dicts, downsample by peptide, shuffle, and purge near-duplicate peaks.
-A ``pipeline`` function chains these stages, and a ``main`` entry point
-exposes them all as CLI subcommands via ``fire``.
+Provides functions to iterate over spectra from MGF files or in-memory dicts,
+shuffle, cap spectra per peptide or precursor (spectra-per-peptide), downsample
+to a target count or proportion (downsample-spectra), and purge near-duplicate
+peaks. A ``pipeline`` function chains shuffle, spectra-per-peptide, and purge
+into a single pass, and a ``main`` entry point exposes them all as CLI
+subcommands via ``fire``.
 """
 
 import itertools
@@ -119,53 +121,6 @@ def write_spectra(
 
     out_iter = tqdm.tqdm(spectra, desc=f"Writing {outfile}", unit="psm")
     pyteomics.mgf.write(out_iter, output=str(outfile))
-
-
-def downsample(
-    spectra: SpectraInput,
-    k: int = 1,
-    outfile: Optional[PathLike] = None,
-    random_seed: int = 42,
-) -> list[PyteomicsSpectrum]:
-    """
-    Downsample spectra by limiting the number of PSMs per peptide sequence.
-
-    Spectra are grouped by peptide sequence, then up to ``k`` spectra are
-    randomly sampled for each unique peptide. If ``outfile`` is provided, the
-    result is also written to disk in MGF format.
-
-    Parameters
-    ----------
-    spectra : PathLike, Iterable[PathLike], or Iterable[PyteomicsSpectrum]
-        Spectrum source — see :func:`iter_spectra` for accepted types.
-    k : int, default=1
-        Maximum number of spectra (PSMs) to retain per unique peptide sequence.
-    outfile : PathLike, optional
-        If provided, write the downsampled spectra to this MGF file path.
-    random_seed : int, default=42
-        Random seed for reproducible sampling.
-
-    Returns
-    -------
-    list[PyteomicsSpectrum]
-        Downsampled spectra; each peptide sequence appears at most ``k`` times.
-    """
-    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
-
-    logging.info("Downsampling to k=%d per peptide (random_seed=%d)", k, random_seed)
-    random.seed(random_seed)
-
-    pep_dict = get_pep_dict_mgf(spectra)
-    n_before = sum(len(v) for v in pep_dict.values())
-    for pep, psms in tqdm.tqdm(
-        pep_dict.items(), desc="Sampling peptides", unit="peptide"
-    ):
-        pep_dict[pep] = random.sample(psms, min(len(psms), k))
-
-    result = list(itertools.chain.from_iterable(pep_dict.values()))
-    logging.info("Downsampled %d -> %d spectra", n_before, len(result))
-    write_spectra(result, outfile)
-    return result
 
 
 def remove_redundant_peaks(
@@ -291,7 +246,7 @@ def pipeline(
     """
     Run spectra through an optional chain of processing stages.
 
-    Stages are applied in order: shuffle → downsample → purge redundant peaks.
+    Stages are applied in order: shuffle → spectra-per-peptide → purge redundant peaks.
     Each stage is skipped when its enabling parameter is ``None`` (or
     ``False`` for ``do_shuffle``).
 
@@ -304,12 +259,13 @@ def pipeline(
     do_shuffle : bool, default=True
         Whether to shuffle the spectra.
     downsample_k : int, optional
-        If provided, downsample to at most this many PSMs per peptide sequence.
+        If provided, retain at most this many spectra per peptide sequence
+        using reservoir sampling.
     purge_epsilon : float, optional
         If provided, remove peaks whose m/z differs from the previous peak by
         less than this value (in daltons).
     random_seed : int, default=42
-        Random seed passed to shuffle and downsample.
+        Random seed passed to shuffle and spectra-per-peptide.
 
     Returns
     -------
@@ -322,7 +278,7 @@ def pipeline(
     if do_shuffle:
         stages.append("shuffle")
     if downsample_k is not None:
-        stages.append(f"downsample(k={downsample_k})")
+        stages.append(f"spectra-per-peptide(k={downsample_k})")
     if purge_epsilon is not None:
         stages.append(f"purge-redundant(epsilon={purge_epsilon})")
     logging.info(
@@ -335,7 +291,7 @@ def pipeline(
         result = shuffle(result, random_seed=random_seed)
 
     if downsample_k is not None:
-        result = downsample(result, k=downsample_k, random_seed=random_seed)
+        result = spectra_per_peptide(result, k=downsample_k, random_seed=random_seed)
 
     if purge_epsilon is not None:
         result = purge_redundant(result, epsilon=purge_epsilon)
@@ -551,7 +507,6 @@ def downsample_spectra(
 COMMANDS: Commands = {
     "pipeline": pipeline,
     "shuffle": shuffle,
-    "downsample": downsample,
     "spectra-per-peptide": spectra_per_peptide,
     "downsample-spectra": downsample_spectra,
     "purge-redundant": purge_redundant,

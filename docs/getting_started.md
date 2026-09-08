@@ -44,7 +44,7 @@ casanovoutils denovoutils --help
 
 ## Quick start examples
 
-### Shuffle and downsample an MGF file
+### Shuffle and cap spectra per peptide
 
 Shuffle spectra and retain at most 2 per peptide sequence:
 
@@ -52,10 +52,10 @@ Shuffle spectra and retain at most 2 per peptide sequence:
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --downsample_k 2
 ```
 
-### Downsample only (no shuffle)
+### Cap spectra per peptide (no shuffle)
 
 ```bash
-casanovoutils mgfutils downsample input.mgf --outfile sampled.mgf --k 2
+casanovoutils mgfutils spectra-per-peptide input.mgf --outfile sampled.mgf --k 2
 ```
 
 ### Remove near-duplicate peaks
