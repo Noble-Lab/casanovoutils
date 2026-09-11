@@ -247,7 +247,7 @@ def purge_redundant(
 
 
 def shuffle(
-    spectra: SpectraInput,
+    *spectra: SpectraInput,
     outfile: Optional[PathLike] = None,
     random_seed: int = 42,
 ) -> list[PyteomicsSpectrum]:
