@@ -273,7 +273,7 @@ def shuffle(
     logging.info("Shuffling spectra (random_seed=%d)", random_seed)
     random.seed(random_seed)
 
-    result = list(iter_spectra(spectra, desc="Reading spectra"))
+    result = list(iter_spectra(*spectra, desc="Reading spectra"))
     random.shuffle(result)
     logging.info("Shuffled %d spectra", len(result))
     write_spectra(result, outfile)
