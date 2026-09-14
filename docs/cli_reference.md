@@ -14,7 +14,6 @@ casanovoutils
 ├── mgfutils        — MGF file processing
 │   ├── pipeline
 │   ├── shuffle
-│   ├── downsample
 │   ├── spectra-per-peptide
 │   ├── downsample-spectra
 │   └── purge-redundant
@@ -46,7 +45,7 @@ Process MGF spectrum files.
 ### `pipeline`
 
 Run spectra through an optional chain of processing stages in order:
-shuffle → downsample → purge redundant peaks. Each stage is skipped when
+shuffle → spectra-per-peptide → purge redundant peaks. Each stage is skipped when
 its enabling parameter is omitted.
 
 | Argument | Type | Default | Description |
@@ -56,7 +55,7 @@ its enabling parameter is omitted.
 | `--do_shuffle` | bool | `True` | Shuffle spectra |
 | `--downsample_k` | int | `None` | Max spectra per peptide (skip if omitted) |
 | `--purge_epsilon` | float | `None` | Min m/z gap to keep a peak in Da (skip if omitted) |
-| `--random_seed` | int | `42` | Random seed for shuffle and downsample |
+| `--random_seed` | int | `42` | Random seed for shuffle and spectra-per-peptide |
 
 **Examples:**
 
@@ -64,7 +63,7 @@ its enabling parameter is omitted.
 # Shuffle only
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle False
 
-# Downsample to 2 spectra per peptide, no shuffle
+# Cap at 2 spectra per peptide, no shuffle
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle --downsample_k 2
 
 # Full pipeline
@@ -88,25 +87,6 @@ Read all spectra and return them in a shuffled order.
 
 ```bash
 casanovoutils mgfutils shuffle input.mgf --outfile shuffled.mgf
-```
-
----
-
-### `downsample`
-
-Limit the number of spectra retained per peptide sequence.
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `spectra` | path | required | Input MGF file path |
-| `--k` | int | `1` | Maximum spectra per peptide |
-| `--outfile` | path | `None` | Output MGF file path |
-| `--random_seed` | int | `42` | Random seed for reproducibility |
-
-**Example:**
-
-```bash
-casanovoutils mgfutils downsample input.mgf --outfile sampled.mgf --k 5
 ```
 
 ---

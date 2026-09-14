@@ -4,7 +4,6 @@ import pytest
 import pyteomics.mgf
 
 from casanovoutils.mgfutils import (
-    downsample,
     downsample_spectra,
     get_pep_dict_mgf,
     iter_spectra,
@@ -138,46 +137,6 @@ def test_purge_redundant_multiple_spectra():
     results = purge_redundant(spectra, epsilon=0.001)
     assert len(results[0]["m/z array"]) == 1
     assert len(results[1]["m/z array"]) == 2
-
-
-# ---------------------------------------------------------------------------
-# downsample
-# ---------------------------------------------------------------------------
-
-
-def test_downsample_limits_to_k():
-    spectra = [make_spectrum("PEP", [float(i)], [1.0]) for i in range(5)]
-    result = downsample(spectra, k=2)
-    assert len(result) == 2
-
-
-def test_downsample_keeps_all_when_k_exceeds_count():
-    spectra = [make_spectrum("PEP", [float(i)], [1.0]) for i in range(3)]
-    result = downsample(spectra, k=10)
-    assert len(result) == 3
-
-
-def test_downsample_per_peptide():
-    spectra = [make_spectrum("AAA", [float(i)], [1.0]) for i in range(4)] + [
-        make_spectrum("BBB", [float(i)], [1.0]) for i in range(4)
-    ]
-    result = downsample(spectra, k=2)
-    assert len(result) == 4
-
-
-def test_downsample_reproducible():
-    spectra = [make_spectrum("PEP", [float(i)], [1.0]) for i in range(10)]
-    r1 = downsample(spectra, k=3, random_seed=0)
-    r2 = downsample(spectra, k=3, random_seed=0)
-    assert [s["m/z array"][0] for s in r1] == [s["m/z array"][0] for s in r2]
-
-
-def test_downsample_different_seeds_differ():
-    spectra = [make_spectrum("PEP", [float(i)], [1.0]) for i in range(10)]
-    r1 = downsample(spectra, k=3, random_seed=0)
-    r2 = downsample(spectra, k=3, random_seed=99)
-    # Very unlikely to be identical across seeds with 10 items choosing 3
-    assert [s["m/z array"][0] for s in r1] != [s["m/z array"][0] for s in r2]
 
 
 # ---------------------------------------------------------------------------
