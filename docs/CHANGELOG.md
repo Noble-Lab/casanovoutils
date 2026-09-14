@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added flag to convert sequences from MassIVE-KB PTM notation to ProForma before
+  splitting in `casanovoutils datasets`
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
   in a single command with each stage independently optional.
 - `casanovoutils mgf purge-redundant`: remove near-duplicate peaks within each
@@ -17,6 +19,8 @@
   preventing duplicate handler registration when functions are composed.
 
 ### Changed
+
+- Improved logging detail in `casanovoutils datasets`
 - `casanovoutils mgfutils shuffle` was sped up with raw text IO. When the input
   is file paths, a raw text IO fast path is used and otherwise the pyteomics
   serialize method is used.
