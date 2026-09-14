@@ -17,7 +17,9 @@
   preventing duplicate handler registration when functions are composed.
 
 ### Changed
-
+- `casanovoutils mgfutils shuffle` was sped up with raw text IO. When the input
+  is file paths, a raw text IO fast path is used and otherwise the pyteomics
+  serialize method is used.
 - Renamed `mgf` to `mgfutils`. Existing commands such as
   `casanovoutils mgf shuffle` should now be invoked as
   `casanovoutils mgfutils shuffle`.
