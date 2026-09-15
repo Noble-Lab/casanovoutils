@@ -206,7 +206,7 @@ def tokenize_sequences(
     data_df: pl.DataFrame,
     seq_column: str,
     out_prefix: Optional[str] = None,
-    combine_n_term: bool = True,
+    combine_n_term: bool = False,
     residues_path: Optional[PathLike] = None,
     replace_isoleucine_with_leucine: bool = True,
 ) -> pl.DataFrame:
