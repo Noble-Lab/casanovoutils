@@ -286,6 +286,16 @@ def _aa_match_prefix(
         m2 = aa_dict.get(peptide2[i2], 0.0)
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
+
+        if not m1_known:
+            raise ValueError(
+                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}'
+            )
+        if not m2_known:
+            raise ValueError(
+                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}'
+            )
+          
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
             # Require both tokens to be known residues to count as a match;
             # unknown tokens (mass defaulting to 0.0) must not match each other.
@@ -327,6 +337,16 @@ def _aa_match_prefix_suffix(
         m2 = aa_dict.get(peptide2[i2], 0.0)
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
+      
+        if not m1_known:
+            raise ValueError(
+                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}'
+            )
+        if not m2_known:
+            raise ValueError(
+                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}'
+            )
+          
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
             aa_matches[max(i1, i2)] = (
                 m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
@@ -451,7 +471,7 @@ def calc_precision_coverage(
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     batch, _, _ = _aa_match_batch(
-        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
+        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold, pc_df
     )
     pep_matches = np.array([m[1] for m in batch], dtype=bool)
     pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))
