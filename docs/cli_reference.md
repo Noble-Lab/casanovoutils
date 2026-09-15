@@ -33,7 +33,8 @@ casanovoutils
 │   └── peptide-lengths
 ├── datasets        — Create train/val/test splits from MGF files
 ├── graphloss       — Plot Casanovo training/validation loss curves
-└── residues        — Residue mass table utilities
+├── residues        — Residue mass table utilities
+└── visualize_errors — Mirror plots of top-k incorrectly predicted spectra
 ```
 
 ---
@@ -508,4 +509,59 @@ back to other tools via `--residues_path`.
 
 ```bash
 casanovoutils residues my_residues.yaml
+```
+
+---
+
+## `casanovoutils visualize_errors`
+
+Plot the top-k incorrectly predicted spectra from a Casanovo de novo
+sequencing run.
+
+Loads an annotated MGF file (with `SEQ=` fields in ProForma notation) and a
+Casanovo mzTab output file, joins them on the spectrum index, and identifies
+incorrect predictions using mass-based matching.  The top-k incorrect spectra
+by Casanovo score are plotted as **mirror plots**: the predicted ProForma
+sequence annotates the top panel and the ground truth ProForma sequence
+annotates the mirrored bottom panel.  A text header on each figure shows rank,
+score, charge, precursor m/z, Δm/z in Da and ppm, and scan number.
+
+By default, isoleucine (I) and leucine (L) are treated as equivalent when
+deciding whether a prediction is correct — they share the same monoisotopic
+mass and cannot be distinguished by standard CID/HCD fragmentation.  Use
+`--distinct_il` to treat them as distinct amino acids.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Annotated MGF file (`SEQ=` fields must be in ProForma notation) |
+| `mztab_file` | path | required | Casanovo mzTab output file |
+| `--output_dir` | path | `"visualize_errors"` | Directory for output PNG files and the log file |
+| `--k` | int | `10` | Maximum number of spectra to plot |
+| `--fragment_tol` | float | `0.05` | Fragment ion mass tolerance for b/y ion annotation |
+| `--fragment_tol_mode` | str | `"Da"` | Tolerance unit: `"Da"` or `"ppm"` |
+| `--ion_types` | str | `"by"` | Ion series to annotate, e.g. `"by"` or `"abcxyz"` |
+| `--neutral_losses` | bool | `False` | Annotate NH₃ and H₂O neutral loss ions |
+| `--distinct_il` | bool | `False` | Treat I and L as distinct amino acids when assessing correctness (by default they are considered equivalent) |
+| `--overwrite` | bool | `False` | Overwrite output PNGs from a previous run |
+| `--residues_path` | path | `None` | Custom residue mass YAML file; if omitted the bundled `residues.yaml` is used |
+
+Each output PNG is named `rank_NNNN_scan_S.png`, where `NNNN` is the rank
+(1 = highest-scoring incorrect prediction) and `S` is the scan number.  A
+`visualize_errors.log` file is also written to `output_dir`.
+
+**Examples:**
+
+```bash
+# Plot top 10 incorrect spectra with default settings
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/
+
+# Plot top 5, treating I and L as distinct, with ppm tolerance
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/ --k 5 --distinct_il \
+  --fragment_tol 20 --fragment_tol_mode ppm
+
+# Include neutral loss annotations
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/ --neutral_losses
 ```

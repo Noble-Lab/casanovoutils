@@ -1,0 +1,82 @@
+MTD	mzTab-version	1.0.0
+MTD	mzTab-mode	Summary
+MTD	mzTab-type	Identification
+MTD	description	Casanovo identification file v5_3
+MTD	software[1]	[MS, MS:1003281, Casanovo, 5.2.1]
+MTD	psm_search_engine_score[1]	[MS, MS:1001143, search engine specific score for PSMs, ]
+MTD	fixed_mod[1]	[MS, MS:1002453, No fixed modifications searched, ]
+MTD	variable_mod[1]	[MS, MS:1002454, No variable modifications searched,]
+MTD	software[1]-setting[1]	model = /net/noble/vol4/user/wnoble/proj/2021_melih_casanovo/results/wnoble/2026-08-19train-v5_3/casanovo-v5_3/casanovo-v5_3.best.ckpt
+MTD	software[1]-setting[2]	config_filename = /net/noble/vol4/user/wnoble/proj/2021_melih_casanovo/results/wnoble/2026-08-19train-v5_3/casanovo.yaml
+MTD	software[1]-setting[3]	min_peptide_len = 6
+MTD	software[1]-setting[4]	max_peptide_len = 100
+MTD	software[1]-setting[5]	predict_batch_size = 1024
+MTD	software[1]-setting[6]	top_match = 1
+MTD	software[1]-setting[7]	accelerator = auto
+MTD	software[1]-setting[8]	devices = None
+MTD	software[1]-setting[9]	n_beams = 1
+MTD	software[1]-setting[10]	precursor_mass_tol = 50.0
+MTD	software[1]-setting[11]	isotope_error_range = (0, 1)
+MTD	software[1]-setting[12]	enzyme = trypsin
+MTD	software[1]-setting[13]	digestion = full
+MTD	software[1]-setting[14]	missed_cleavages = 0
+MTD	software[1]-setting[15]	max_mods = 1
+MTD	software[1]-setting[16]	allowed_fixed_mods = C:C[Carbamidomethyl]
+MTD	software[1]-setting[17]	allowed_var_mods = M:M[Oxidation],N:N[Deamidated],Q:Q[Deamidated],nterm:[Acetyl]-,nterm:[Carbamyl]-,nterm:[Ammonia-loss]-,nterm:[+25.980265]-
+MTD	software[1]-setting[18]	random_seed = 454
+MTD	software[1]-setting[19]	n_log = 1
+MTD	software[1]-setting[20]	tb_summarywriter = False
+MTD	software[1]-setting[21]	log_metrics = False
+MTD	software[1]-setting[22]	log_every_n_steps = 50
+MTD	software[1]-setting[23]	lance_dir = None
+MTD	software[1]-setting[24]	val_check_interval = 50000
+MTD	software[1]-setting[25]	min_peaks = 20
+MTD	software[1]-setting[26]	max_peaks = 150
+MTD	software[1]-setting[27]	min_mz = 50.0
+MTD	software[1]-setting[28]	max_mz = 2500.0
+MTD	software[1]-setting[29]	min_intensity = 0.01
+MTD	software[1]-setting[30]	remove_precursor_tol = 2.0
+MTD	software[1]-setting[31]	max_charge = 4
+MTD	software[1]-setting[32]	dim_model = 512
+MTD	software[1]-setting[33]	n_head = 8
+MTD	software[1]-setting[34]	dim_feedforward = 1024
+MTD	software[1]-setting[35]	n_layers = 9
+MTD	software[1]-setting[36]	dropout = 0.0
+MTD	software[1]-setting[37]	dim_intensity = None
+MTD	software[1]-setting[38]	warmup_iters = 100000
+MTD	software[1]-setting[39]	cosine_schedule_period_iters = 3000000
+MTD	software[1]-setting[40]	learning_rate = 0.0005
+MTD	software[1]-setting[41]	weight_decay = 1e-05
+MTD	software[1]-setting[42]	train_label_smoothing = 0.01
+MTD	software[1]-setting[43]	train_batch_size = 32
+MTD	software[1]-setting[44]	max_epochs = 300
+MTD	software[1]-setting[45]	shuffle = True
+MTD	software[1]-setting[46]	shuffle_buffer_size = 10000
+MTD	software[1]-setting[47]	num_sanity_val_steps = 0
+MTD	software[1]-setting[48]	calculate_precision = False
+MTD	software[1]-setting[49]	accumulate_grad_batches = 1
+MTD	software[1]-setting[50]	gradient_clip_val = 1.0
+MTD	software[1]-setting[51]	gradient_clip_algorithm = norm
+MTD	software[1]-setting[52]	precision = 32-true
+MTD	software[1]-setting[53]	replace_isoleucine_with_leucine = False
+MTD	software[1]-setting[54]	massivekb_tokenizer = False
+MTD	software[1]-setting[56]	new_token_init = {}
+MTD	software[1]-setting[57]	n_workers = 0
+MTD	ms_run[1]-location	file:///net/noble/vol4/user/wnoble/proj/2021_melih_casanovo/results/wnoble/2026-08-22test-v5_3/multi-enzyme/v5_3.input.mgf
+PSH	sequence	PSM_ID	accession	unique	database	database_version	search_engine	search_engine_score[1]	modifications	retention_time	charge	exp_mass_to_charge	calc_mass_to_charge	spectra_ref	pre	post	start	end	opt_global_aa_scores	opt_global_cv_MS:1003169_proforma_peptidoform_sequence	opt_global_cv_MS:1003057_scan_number
+PSM	EAAGAVPGMEEPMEPSMDEVATEAPPVEEELK	1	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	1.05147356e-10	null	null	3	1124.5	1123.8402099609375	ms_run[1]:index=0	null	null	null	null	0.41452,0.62199,0.97207,0.75357,0.35617,0.56851,0.95370,0.49083,0.53750,0.22521,0.38243,0.95377,0.55400,0.31487,0.74740,0.13905,0.54932,0.46756,0.15483,0.30823,0.86365,0.76742,0.88261,0.83603,0.73610,0.71894,0.63576,0.47242,0.61166,0.17870,0.16964,0.41905	EAAGAVPGMEEPMEPSMDEVATEAPPVEEELK	ms_run[1]:scan=6
+PSM	AAAEAAAAEEEEEEEEEEEEEEEVKEEEK	2	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	2.4891993e-14	0-Carbamyl (N-term):UNIMOD:5	null	4	843.8800048828125	842.3431396484375	ms_run[1]:index=1	null	null	null	null	0.52428,0.69623,0.64235,0.24765,0.57398,0.69500,0.35214,0.29833,0.30827,0.25516,0.27773,0.29314,0.32781,0.37134,0.35835,0.33608,0.30366,0.29524,0.27441,0.22417,0.19384,0.23427,0.25308,0.35319,0.86288,0.35351,0.26806,0.13666,0.44055	[Carbamyl]-AAAEAAAAEEEEEEEEEEEEEEEVKEEEK	ms_run[1]:scan=7
+PSM	GPTPVARCVGKYCVQQLGKE	3	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	1.5746233e-05	8-Carbamidomethyl (C):UNIMOD:4; 13-Carbamidomethyl (C):UNIMOD:4	null	4	563.0432739257812	562.5397338867188	ms_run[1]:index=2	null	null	null	null	0.99450,0.74651,0.68402,0.98577,0.96312,0.15779,0.66586,0.11557,0.16820,0.24016,0.44463,0.75425,0.97336,0.98245,0.98814,0.98929,0.50601,0.98490,0.49150,0.87579	GPTPVARC[Carbamidomethyl]VGKYC[Carbamidomethyl]VQQLGKE	ms_run[1]:scan=9
+PSM	ADVLDLHEAGGEDFAMDEDGDESIHKIKE	4	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.179543	0-Acetyl (N-term):UNIMOD:1	null	3	1076.48486328125	1076.4822998046875	ms_run[1]:index=4	null	null	null	null	0.95420,0.77076,0.99341,0.69070,0.99304,0.88823,0.99270,0.99349,0.99069,0.99332,0.93944,0.98966,0.99458,0.97565,0.99360,0.98569,0.99075,0.99011,0.98396,0.99180,0.99797,0.97965,0.97689,0.96047,0.98995,0.98568,0.56255,0.99231,0.99343	[Acetyl]-ADVLDLHEAGGEDFAMDEDGDESIHKIKE	ms_run[1]:scan=29
+PSM	ADVLDLHEAGGEDFAMDEDGDESIHKLKE	5	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.037596654	0-Acetyl (N-term):UNIMOD:1	null	4	807.6132202148438	807.6134643554688	ms_run[1]:index=5	null	null	null	null	0.93047,0.98122,0.99338,0.73911,0.92607,0.58505,0.94329,0.84209,0.98987,0.93605,0.60415,0.76132,0.98711,0.84081,0.99150,0.99212,0.98706,0.99037,0.98225,0.99169,0.99634,0.98927,0.96703,0.59216,0.99075,0.98761,0.72796,0.99255,0.99559	[Acetyl]-ADVLDLHEAGGEDFAMDEDGDESIHKLKE	ms_run[1]:scan=30
+PSM	LFPVDMIENCSHEE	6	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.13666366	10-Carbamidomethyl (C):UNIMOD:4	null	2	860.3600463867188	860.371337890625	ms_run[1]:index=7	null	null	null	null	0.42117,0.85374,0.99083,0.99023,0.98951,0.96682,0.66295,0.99251,0.98885,0.99605,0.98961,0.98967,0.95445,0.67567	LFPVDMIENC[Carbamidomethyl]SHEE	ms_run[1]:scan=41
+PSM	DLRETPSLVSPLLEERLLPLSPPAQEELLK	7	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	6.286716e-17	null	null	4	848.4802856445312	846.4761962890625	ms_run[1]:index=8	null	null	null	null	0.97663,0.20745,0.20417,0.12093,0.13375,0.62305,0.12627,0.15932,0.17262,0.72112,0.61978,0.18613,0.50560,0.85860,0.29668,0.18630,0.13642,0.20202,0.22521,0.20039,0.81597,0.96766,0.84935,0.36940,0.30265,0.17961,0.14060,0.13469,0.14052,0.49282	DLRETPSLVSPLLEERLLPLSPPAQEELLK	ms_run[1]:scan=69
+PSM	GATVGVASGPRAGAPGPLQDETL	8	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	2.592206e-05	null	null	2	1059.55224609375	1061.0504150390625	ms_run[1]:index=9	null	null	null	null	0.97840,0.69231,0.84785,0.90799,0.73554,0.21453,0.33979,0.27287,0.68373,0.70042,0.50341,0.47539,0.39555,0.53118,0.99303,0.99610,0.98330,0.74985,0.92087,0.84684,0.29445,0.95518,0.89191	GATVGVASGPRAGAPGPLQDETL	ms_run[1]:scan=77
+PSM	AVAGAVSGEPIVHW	9	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.32054085	0-Acetyl (N-term):UNIMOD:1	null	2	717.8717041015625	717.8724365234375	ms_run[1]:index=10	null	null	null	null	0.97963,0.82165,0.93571,0.98455,0.66126,0.99336,0.98912,0.99134,0.95304,0.99279,0.77130,0.98903,0.98858,0.94827	[Acetyl]-AVAGAVSGEPIVHW	ms_run[1]:scan=78
+PSM	KDPTYGLESCLAGTGPDEPEK	10	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.014178411	10-Carbamidomethyl (C):UNIMOD:4	null	2	1133.02001953125	1132.52294921875	ms_run[1]:index=11	null	null	null	null	0.41259,0.69165,0.92859,0.90639,0.64632,0.62341,0.58662,0.52165,0.89298,0.98917,0.61197,0.99331,0.98774,0.99116,0.99121,0.98595,0.99473,0.98929,0.98856,0.99060,0.97482	KDPTYGLESC[Carbamidomethyl]LAGTGPDEPEK	ms_run[1]:scan=89
+PSM	ELAALVLDNGSGMCK	11	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.37792993	0-Acetyl (N-term):UNIMOD:1; 14-Carbamidomethyl (C):UNIMOD:4	null	2	810.3984375	810.3919067382812	ms_run[1]:index=12	null	null	null	null	0.93175,0.76124,0.98677,0.98569,0.96090,0.99134,0.64910,0.99048,0.99169,0.98799,0.99353,0.99048,0.95766,0.98553,0.99146	[Acetyl]-ELAALVLDNGSGMC[Carbamidomethyl]K	ms_run[1]:scan=91
+PSM	FAVSMRKKAMSKKGLYQEDQGKSNALRE	12	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	6.7373767e-12	null	null	4	800.9210815429688	800.922119140625	ms_run[1]:index=13	null	null	null	null	0.98361,0.89790,0.56446,0.60370,0.20100,0.12513,0.41527,0.26232,0.35597,0.16312,0.21821,0.23542,0.59019,0.95781,0.24035,0.13110,0.10529,0.12464,0.98972,0.42648,0.37357,0.36038,0.98990,0.98611,0.98369,0.42382,0.52199,0.97896	FAVSMRKKAMSKKGLYQEDQGKSNALRE	ms_run[1]:scan=106
+PSM	DAAGQDASAGLKEEEEESLKPLLQALLLK	13	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	9.449502e-19	null	null	3	1023.1821899414062	1022.8782958984375	ms_run[1]:index=14	null	null	null	null	0.52710,0.26786,0.21126,0.51869,0.50855,0.77092,0.76116,0.26549,0.45323,0.84254,0.23828,0.23913,0.15252,0.15174,0.15510,0.15539,0.14236,0.37525,0.11525,0.12216,0.31320,0.14305,0.15096,0.14275,0.10740,0.10708,0.16711,0.09703,0.47332	DAAGQDASAGLKEEEEESLKPLLQALLLK	ms_run[1]:scan=134
+PSM	MAWRFKKFVEGVDSDYHDE	14	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.0023241916	null	null	2	1180.0438232421875	1180.044189453125	ms_run[1]:index=15	null	null	null	null	0.85579,0.40036,0.20043,0.23946,0.23487,0.96469,0.99138,0.99102,0.99179,0.99285,0.98823,0.98053,0.99361,0.98998,0.98501,0.99508,0.99117,0.93092,0.75561	MAWRFKKFVEGVDSDYHDE	ms_run[1]:scan=169
+PSM	MFNTRKKFVEGVDSDYHDE	15	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	0.12668419	0-Acetyl (N-term):UNIMOD:1	null	3	787.0292358398438	787.02685546875	ms_run[1]:index=16	null	null	null	null	0.91920,0.98429,0.61483,0.59917,0.42801,0.99819,0.99636,0.99362,0.99176,0.99168,0.98959,0.99482,0.99499,0.99389,0.98884,0.99689,0.97580,0.99310,0.99185	[Acetyl]-MFNTRKKFVEGVDSDYHDE	ms_run[1]:scan=170
+PSM	MVLLHRGGKGVMGVDSDYHDE	16	null	null	null	null	[MS, MS:1003281, Casanovo, 5.2.1]	2.198045e-07	0-Acetyl (N-term):UNIMOD:1	null	4	590.5253295898438	590.0307006835938	ms_run[1]:index=17	null	null	null	null	0.57765,0.43079,0.20633,0.44684,0.16189,0.18768,0.17644,0.14627,0.41058,0.46625,0.30489,0.38719,0.98670,0.67236,0.98855,0.98995,0.99043,0.99316,0.99396,0.99142,0.86716	[Acetyl]-MVLLHRGGKGVMGVDSDYHDE	ms_run[1]:scan=171
