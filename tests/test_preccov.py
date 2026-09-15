@@ -28,8 +28,8 @@ def pc_input_df():
     # residues.yaml vocabulary, so bare "C" is an unknown token.
     return pl.DataFrame(
         {
-            Constants.predicted_tokens: ["A", "B", "K", "D"],
-            Constants.ground_truth_tokens: ["A", "X", "K", "Y"],
+            Constants.predicted_tokens: ["A", "A", "K", "D"],
+            Constants.ground_truth_tokens: ["A", "A", "K", "Y"],
             Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
             Constants.aa_scores_column: ["", "", "", ""],
         }
