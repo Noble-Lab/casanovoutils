@@ -476,7 +476,7 @@ def calc_precision_coverage(
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     batch, _, _ = _aa_match_batch(
-        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold, pc_df
+        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
     pep_matches = np.array([m[1] for m in batch], dtype=bool)
     pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))
