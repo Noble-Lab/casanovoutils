@@ -595,6 +595,13 @@ def get_prec_cov_df(
     pred_col = Constants.get_pred_sequence_column(pc_df)
     logging.debug("Using predicted sequence column '%s'", pred_col)
 
+    aa_col = Constants.get_aa_scores_column(pc_df)
+    if aa_col != Constants.aa_scores_column:
+        logging.debug(
+            "Renaming aa scores column '%s' -> '%s'", aa_col, Constants.aa_scores_column
+        )
+        pc_df = pc_df.rename({aa_col: Constants.aa_scores_column})
+
     pc_df = fill_null_columns(pc_df, pred_col)
     pc_df = tokenize_and_parse_scores(
         pc_df, pred_col, residues_path, replace_isoleucine_with_leucine
