@@ -233,7 +233,9 @@ def _write_html(
     """
     stem = output_dir.name
     pct_correct = (
-        f"{100.0 * n_correct / n_with_predictions:.1f}" if n_with_predictions else "N/A"
+        f"{100.0 * n_correct / n_with_predictions:.1f}%"
+        if n_with_predictions
+        else "N/A"
     )
 
     summary_html = f"""<table>
@@ -246,7 +248,7 @@ def _write_html(
 <tr><th style="text-align:left">With Casanovo predictions</th>
     <td>{n_with_predictions}</td></tr>
 <tr><th style="text-align:left">Correct predictions</th>
-    <td>{n_correct} ({pct_correct}%)</td></tr>
+    <td>{n_correct} ({pct_correct})</td></tr>
 </table>"""
 
     items = "\n".join(

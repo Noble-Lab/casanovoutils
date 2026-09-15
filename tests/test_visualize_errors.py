@@ -249,6 +249,24 @@ _DUMMY_STATS = dict(
 )
 
 
+def test_write_html_no_predictions(tmp_path):
+    """With no predictions the accuracy reads N/A, without a percent sign, and
+    an empty plot list still produces the report."""
+    out = _write_html(
+        tmp_path,
+        [],
+        mgf_file="a.mgf",
+        mztab_file="a.mztab",
+        n_total=0,
+        n_with_predictions=0,
+        n_correct=0,
+    )
+    text = out.read_text()
+    assert "N/A" in text
+    assert "N/A%" not in text
+    assert "<img" not in text
+
+
 def test_write_html_standalone(tmp_path):
     """_write_html creates <stem>.html from a list of paths."""
     d = tmp_path / "myrun"
