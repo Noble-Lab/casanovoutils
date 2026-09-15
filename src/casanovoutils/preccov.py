@@ -242,6 +242,7 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
 
 def _aa_match_prefix(
+    mgf_title: str, 
     peptide1: list[str],
     peptide2: list[str],
     aa_dict: dict[str, float],
@@ -289,11 +290,11 @@ def _aa_match_prefix(
 
         if not m1_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}'
+                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}. The spectra title is {mgf_title}.'
             )
         if not m2_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}'
+                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
             )
           
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
@@ -316,6 +317,7 @@ def _aa_match_prefix(
 
 
 def _aa_match_prefix_suffix(
+    mgf_title: str,
     peptide1: list[str],
     peptide2: list[str],
     aa_dict: dict[str, float],
@@ -344,11 +346,11 @@ def _aa_match_prefix_suffix(
       
         if not m1_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}'
+                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}. The spectra title is {mgf_title}.'
             )
         if not m2_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}'
+                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
             )
           
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
@@ -366,6 +368,7 @@ def _aa_match_prefix_suffix(
 
 
 def _aa_match_batch(
+    mgf_titles: list,
     peptides1: list,
     peptides2: list,
     aa_dict: dict[str, float],
@@ -401,7 +404,7 @@ def _aa_match_batch(
     """
     results: list[tuple[np.ndarray, bool]] = []
     n_aa1, n_aa2 = 0, 0
-    for p1, p2 in zip(peptides1, peptides2, strict=True):
+    for title, p1, p2 in zip(mgf_titles, peptides1, peptides2, strict=True):
         # A string is one exploded residue, not a sequence. Splitting it on
         # uppercase letters would turn "M[Oxidation]" into "M[" and "Oxidation]".
         if isinstance(p1, str):
@@ -421,7 +424,7 @@ def _aa_match_batch(
         n_aa2 += len(p2)
         results.append(
             _aa_match_prefix_suffix(
-                p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold
+                title, p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold
             )
         )
     return results, n_aa1, n_aa2
@@ -475,8 +478,9 @@ def calc_precision_coverage(
     aa_dict = get_residues(residues_path)
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
+    mgf_titles = pc_df.get_column(Constants.mgf_title).to_list()
     batch, _, _ = _aa_match_batch(
-        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
+        mgf_titles, pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
     pep_matches = np.array([m[1] for m in batch], dtype=bool)
     pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))
