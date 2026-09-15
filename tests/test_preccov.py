@@ -32,6 +32,7 @@ def pc_input_df():
             Constants.ground_truth_tokens: ["A", "A", "K", "Y"],
             Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
             Constants.aa_scores_column: ["", "", "", ""],
+            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
         }
     )
 
@@ -196,6 +197,7 @@ def test_calc_precision_coverage_output_columns():
             Constants.ground_truth_tokens: ["A", "X", "K", "Y"],
             Constants.pep_score_column: [0.9, 0.8, 0.7, 0.6],
             Constants.aa_scores_column: ["", "", "", ""],
+            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
         }
     )
     with pytest.raises(ValueError):
@@ -248,6 +250,7 @@ def test_calc_precision_coverage_all_correct():
             Constants.ground_truth_tokens: ["A", "K", "G"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
+            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
         }
     )
     result = calc_precision_coverage(df, Constants.pep_score_column)
@@ -266,6 +269,7 @@ def test_calc_precision_coverage_all_wrong():
             Constants.ground_truth_tokens: ["Q", "Y", "V"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
+            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
         }
     )
     result = calc_precision_coverage(df, Constants.pep_score_column)
@@ -290,7 +294,7 @@ _RESIDUES = {
 def test_aa_match_prefix_identical():
     """Identical sequences fully match."""
     aa_matches, pep_match = _aa_match_prefix(
-        ["A", "G", "L"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
+        "foo", ["A", "G", "L"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
     )
     assert pep_match is True
     assert aa_matches.all()
@@ -299,7 +303,7 @@ def test_aa_match_prefix_identical():
 def test_aa_match_prefix_il_equivalent():
     """I and L have the same mass and are treated as a match."""
     aa_matches, pep_match = _aa_match_prefix(
-        ["A", "I", "G"], ["A", "L", "G"], _RESIDUES, 0.5, 0.1
+        "foo", ["A", "I", "G"], ["A", "L", "G"], _RESIDUES, 0.5, 0.1
     )
     assert pep_match is True
     assert aa_matches.all()
@@ -307,7 +311,7 @@ def test_aa_match_prefix_il_equivalent():
 
 def test_aa_match_prefix_mass_mismatch():
     """Residues with clearly different masses do not match."""
-    aa_matches, pep_match = _aa_match_prefix(["A"], ["E"], _RESIDUES, 0.5, 0.1)
+    aa_matches, pep_match = _aa_match_prefix("foo", ["A"], ["E"], _RESIDUES, 0.5, 0.1)
     assert pep_match is False
     assert not aa_matches.any()
 
@@ -315,7 +319,7 @@ def test_aa_match_prefix_mass_mismatch():
 def test_aa_match_prefix_length_mismatch():
     """Sequences of different lengths never fully match."""
     aa_matches, pep_match = _aa_match_prefix(
-        ["A", "G"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
+        "foo", ["A", "G"], ["A", "G", "L"], _RESIDUES, 0.5, 0.1
     )
     assert pep_match is False
 
@@ -324,9 +328,9 @@ def test_aa_match_prefix_ind_mass_threshold():
     """A residue pair matches only when its mass difference is within the
     per-residue tolerance."""
     masses = {"A": 100.0, "B": 100.05, "C": 100.2}
-    _, close = _aa_match_prefix(["A"], ["B"], masses, 0.5, 0.1)
-    _, far = _aa_match_prefix(["A"], ["C"], masses, 0.5, 0.1)
-    _, far_loose = _aa_match_prefix(["A"], ["C"], masses, 0.5, 0.3)
+    _, close = _aa_match_prefix("foo", ["A"], ["B"], masses, 0.5, 0.1)
+    _, far = _aa_match_prefix("foo", ["A"], ["C"], masses, 0.5, 0.1)
+    _, far_loose = _aa_match_prefix("foo", ["A"], ["C"], masses, 0.5, 0.3)
     assert close is True
     assert far is False
     assert far_loose is True
@@ -336,8 +340,8 @@ def test_aa_match_prefix_cum_mass_threshold():
     """The cumulative-mass tolerance decides whether a position is compared
     at all."""
     masses = {"A": 100.0, "E": 100.4}
-    _, within = _aa_match_prefix(["A"], ["E"], masses, 0.5, 1.0)
-    _, outside = _aa_match_prefix(["A"], ["E"], masses, 0.3, 1.0)
+    _, within = _aa_match_prefix("foo", ["A"], ["E"], masses, 0.5, 1.0)
+    _, outside = _aa_match_prefix("foo", ["A"], ["E"], masses, 0.3, 1.0)
     assert within is True
     assert outside is False
 
@@ -346,7 +350,7 @@ def test_aa_match_batch_single_token_strings():
     """A string element is one token, so a modified residue is not split."""
     masses = {"M[Oxidation]": 147.035, "M": 131.040}
     batch, n1, n2 = _aa_match_batch(
-        ["M[Oxidation]", "M"], ["M[Oxidation]", "M[Oxidation]"], masses
+        ["foo", "foo"], ["M[Oxidation]", "M"], ["M[Oxidation]", "M[Oxidation]"], masses
     )
     assert batch[0][1] is True
     assert batch[1][1] is False
@@ -363,6 +367,7 @@ def test_calc_precision_coverage_forwards_thresholds(tmp_path):
             Constants.ground_truth_tokens: [["B"]],
             Constants.pep_score_column: [0.9],
             Constants.aa_scores_column: [""],
+            Constants.mgf_title: ["foo"]
         }
     )
     tight = calc_precision_coverage(
@@ -378,6 +383,7 @@ def test_calc_precision_coverage_forwards_thresholds(tmp_path):
 def test_aa_match_batch_il_equivalence():
     """_aa_match_batch marks I/L substitutions as correct at peptide level."""
     batch, _, _ = _aa_match_batch(
+        ["foo", "foo"],
         [["A", "I", "D"], ["G", "L"]],
         [["A", "L", "D"], ["G", "I"]],
         _RESIDUES,
@@ -394,6 +400,7 @@ def test_calc_precision_coverage_il_match():
             Constants.ground_truth_tokens: [["A", "L", "G"], ["A", "I", "G"]],
             Constants.pep_score_column: [0.9, 0.8],
             Constants.aa_scores_column: ["", ""],
+            Constants.mgf_title: ["foo", "foo"],
         }
     )
     result = calc_precision_coverage(df, Constants.pep_score_column)
