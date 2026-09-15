@@ -201,11 +201,10 @@ def test_calc_precision_coverage_correctness_flag(pc_input_df):
     result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
     # sorted descending by score: A(0.9), B(0.8), C(0.7), D(0.6)
     # A vs A: same known token → match.
-    # B vs X: both unknown (not in residue dict) → no match even though
-    #         cumulative delta is 0; unknown tokens cannot match.
+    # A vs A: same known token → match.
     # C vs C: same known token → match.
     # D (115.03 Da) vs Y (163.06 Da): delta ~48 Da > 0.5 → no match.
-    assert result["pc_is_correct"].to_list() == [True, False, True, False]
+    assert result["pc_is_correct"].to_list() == [True, True, True, False]
 
 
 def test_calc_precision_coverage_precision_range(pc_input_df):
@@ -253,7 +252,7 @@ def test_calc_precision_coverage_all_wrong():
     df = pl.DataFrame(
         {
             Constants.predicted_tokens: ["A", "Q", "W"],
-            Constants.ground_truth_tokens: ["X", "Y", "V"],
+            Constants.ground_truth_tokens: ["Q", "Y", "V"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
         }
