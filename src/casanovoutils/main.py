@@ -5,8 +5,7 @@ Builds a nested command dict from each submodule's COMMANDS constant and
 exposes them as a single ``casanovoutils`` CLI via ``fire``.
 
 Submodules are auto-detected: any module with a ``COMMANDS`` constant is
-included. The CLI key is taken from a ``CLI_NAME`` constant if present,
-otherwise the module name with a trailing ``utils`` suffix stripped.
+included, keyed by the module name (for example ``mgfutils``).
 """
 
 import functools

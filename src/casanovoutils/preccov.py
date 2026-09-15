@@ -23,7 +23,6 @@ import dataclasses
 import functools
 import logging
 import pathlib
-import re
 from os import PathLike
 from typing import Any, Optional
 
@@ -255,6 +254,11 @@ def _aa_match_prefix(
     cumulative mass when the two sides fall out of sync, similar to the DeepNovo
     evaluation criterion.
 
+    This differs from Casanovo's ``aa_match_prefix`` in how tokens absent from
+    ``aa_dict`` are treated.  Casanovo gives them mass 0 and therefore lets any
+    two unknown tokens match each other; here unknown tokens are never matched
+    by mass.
+
     Parameters
     ----------
     peptide1, peptide2 : list[str]
@@ -346,14 +350,16 @@ def _aa_match_batch(
     """Apply mass-based matching to a batch of predicted/ground-truth pairs.
 
     Mirrors the ``aa_match_batch`` function from Casanovo without depending on
-    that package.  Accepts either pre-tokenized lists of strings or plain
-    strings (which are split on uppercase letter boundaries, e.g. ``"AGK"``
-    → ``["A", "G", "K"]``).
+    that package.  Each element is a list of residue tokens from
+    :func:`.denovoutils.tokenize_sequences`, or a single token string from a
+    per-residue row of :func:`align_and_explode`.  A string counts as one
+    token and is not split, so ``"M[Oxidation]"`` stays intact.
 
     Parameters
     ----------
     peptides1, peptides2 : list
-        Parallel iterables of peptide sequences (list[str] or str each).
+        Parallel iterables of peptide sequences, each a list[str] or one
+        token as str.
     aa_dict : dict[str, float]
         Residue mass dictionary from :func:`.residues.get_residues`.
     cum_mass_threshold : float
@@ -370,12 +376,13 @@ def _aa_match_batch(
     """
     results: list[tuple[np.ndarray, bool]] = []
     n_aa1, n_aa2 = 0, 0
-    _split = re.compile(r"(?<=.)(?=[A-Z])").split
     for p1, p2 in zip(peptides1, peptides2, strict=True):
+        # A string is one exploded residue, not a sequence. Splitting it on
+        # uppercase letters would turn "M[Oxidation]" into "M[" and "Oxidation]".
         if isinstance(p1, str):
-            p1 = _split(p1) if p1 else []
+            p1 = [p1] if p1 else []
         if isinstance(p2, str):
-            p2 = _split(p2) if p2 else []
+            p2 = [p2] if p2 else []
         if not p1 and not p2:
             results.append((np.empty(0, dtype=bool), False))
             continue

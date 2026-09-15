@@ -310,6 +310,61 @@ def test_aa_match_prefix_length_mismatch():
     assert pep_match is False
 
 
+def test_aa_match_prefix_ind_mass_threshold():
+    """A residue pair matches only when its mass difference is within the
+    per-residue tolerance."""
+    masses = {"A": 100.0, "B": 100.05, "C": 100.2}
+    _, close = _aa_match_prefix(["A"], ["B"], masses, 0.5, 0.1)
+    _, far = _aa_match_prefix(["A"], ["C"], masses, 0.5, 0.1)
+    _, far_loose = _aa_match_prefix(["A"], ["C"], masses, 0.5, 0.3)
+    assert close is True
+    assert far is False
+    assert far_loose is True
+
+
+def test_aa_match_prefix_cum_mass_threshold():
+    """The cumulative-mass tolerance decides whether a position is compared
+    at all."""
+    masses = {"A": 100.0, "E": 100.4}
+    _, within = _aa_match_prefix(["A"], ["E"], masses, 0.5, 1.0)
+    _, outside = _aa_match_prefix(["A"], ["E"], masses, 0.3, 1.0)
+    assert within is True
+    assert outside is False
+
+
+def test_aa_match_batch_single_token_strings():
+    """A string element is one token, so a modified residue is not split."""
+    masses = {"M[Oxidation]": 147.035, "M": 131.040}
+    batch, n1, n2 = _aa_match_batch(
+        ["M[Oxidation]", "M"], ["M[Oxidation]", "M[Oxidation]"], masses
+    )
+    assert batch[0][1] is True
+    assert batch[1][1] is False
+    assert (n1, n2) == (2, 2)
+
+
+def test_calc_precision_coverage_forwards_thresholds(tmp_path):
+    """calc_precision_coverage passes the tolerances and residue file through."""
+    residues = tmp_path / "residues.yaml"
+    residues.write_text('"A": 100.0\n"B": 100.05\n')
+    df = pl.DataFrame(
+        {
+            Constants.predicted_tokens: [["A"]],
+            Constants.ground_truth_tokens: [["B"]],
+            Constants.pep_score_column: [0.9],
+            Constants.aa_scores_column: [""],
+        }
+    )
+    tight = calc_precision_coverage(
+        df, Constants.pep_score_column, 0.5, 0.01, residues_path=residues
+    )
+    loose = calc_precision_coverage(
+        df, Constants.pep_score_column, 0.5, 0.1, residues_path=residues
+    )
+    assert tight["pc_is_correct"].to_list() == [False]
+    assert loose["pc_is_correct"].to_list() == [True]
+
+
 def test_aa_match_batch_il_equivalence():
     """_aa_match_batch marks I/L substitutions as correct at peptide level."""
     batch, _, _ = _aa_match_batch(
