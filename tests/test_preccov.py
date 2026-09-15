@@ -310,6 +310,32 @@ def test_aa_match_prefix_length_mismatch():
     assert pep_match is False
 
 
+def test_aa_match_prefix_nterm_mod_identical():
+    """A compound N-terminal token absent from the residue map matches itself."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["[Acetyl]-P", "E", "K"], ["[Acetyl]-P", "E", "K"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is True
+    assert aa_matches.all()
+
+
+def test_aa_match_prefix_nterm_mod_different():
+    """Different compound N-terminal tokens do not match at that position."""
+    aa_matches, pep_match = _aa_match_prefix(
+        ["[Acetyl]-P", "E", "K"], ["[Acetyl]-A", "E", "K"], _RESIDUES, 0.5, 0.1
+    )
+    assert pep_match is False
+    assert not aa_matches[0]
+
+
+def test_aa_match_prefix_unknown_tokens():
+    """Unknown residues match only when identical, unlike Casanovo."""
+    _, same = _aa_match_prefix(["B", "K"], ["B", "K"], _RESIDUES, 0.5, 0.1)
+    _, different = _aa_match_prefix(["B", "K"], ["X", "K"], _RESIDUES, 0.5, 0.1)
+    assert same is True
+    assert different is False
+
+
 def test_aa_match_batch_il_equivalence():
     """_aa_match_batch marks I/L substitutions as correct at peptide level."""
     batch, _, _ = _aa_match_batch(
