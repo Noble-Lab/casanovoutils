@@ -242,7 +242,7 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
 
 def _aa_match_prefix(
-    mgf_title: str, 
+    mgf_title: str,
     peptide1: list[str],
     peptide2: list[str],
     aa_dict: dict[str, float],
@@ -296,7 +296,7 @@ def _aa_match_prefix(
             raise ValueError(
                 f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
             )
-          
+
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
             # Two tokens match when they are string-equal (handles compound
             # N-terminal tokens like "[Acetyl]-A" that are absent from aa_dict)
@@ -343,7 +343,7 @@ def _aa_match_prefix_suffix(
         m2 = aa_dict.get(peptide2[i2], 0.0)
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
-      
+
         if not m1_known:
             raise ValueError(
                 f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}. The spectra title is {mgf_title}.'
@@ -352,7 +352,7 @@ def _aa_match_prefix_suffix(
             raise ValueError(
                 f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
             )
-          
+
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
             same_token = peptide1[i1] == peptide2[i2]
             aa_matches[max(i1, i2)] = same_token or (
@@ -479,14 +479,19 @@ def calc_precision_coverage(
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
     title_col = Constants.get_mgf_title_column(pc_df)
-  
+
     if title_col is not None:
         mgf_titles = pc_df.get_column(title_col).to_list()
     else:
         mgf_titles = [f"spectra {i}" for i in range(pc_df.height)]
-      
+
     batch, _, _ = _aa_match_batch(
-        mgf_titles, pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
+        mgf_titles,
+        pred_tokens,
+        truth_tokens,
+        aa_dict,
+        cum_mass_threshold,
+        ind_mass_threshold,
     )
     pep_matches = np.array([m[1] for m in batch], dtype=bool)
     pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))

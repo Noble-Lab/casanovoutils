@@ -190,6 +190,7 @@ def test_mutate_row_as_dict_aligned_lengths_equal(sample_row):
 
 # ── calc_precision_coverage ───────────────────────────────────────────────────
 
+
 def test_calc_precision_coverage_output_columns():
     pc_df = pl.DataFrame(
         {
@@ -202,6 +203,7 @@ def test_calc_precision_coverage_output_columns():
     )
     with pytest.raises(ValueError):
         result = calc_precision_coverage(pc_df, Constants.pep_score_column)
+
 
 def test_calc_precision_coverage_output_columns(pc_input_df):
     result = calc_precision_coverage(pc_input_df, Constants.pep_score_column)
@@ -367,7 +369,7 @@ def test_calc_precision_coverage_forwards_thresholds(tmp_path):
             Constants.ground_truth_tokens: [["B"]],
             Constants.pep_score_column: [0.9],
             Constants.aa_scores_column: [""],
-            Constants.mgf_title: ["foo"]
+            Constants.mgf_title: ["foo"],
         }
     )
     tight = calc_precision_coverage(

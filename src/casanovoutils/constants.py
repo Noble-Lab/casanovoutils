@@ -45,8 +45,8 @@ class Constants:
     predicted_tokens: str = "mztab_tokens"
     ground_truth_tokens: str = "mgf_tokens"
     min_score: float = -1.0
-    mgf_title: str = "mgf_title" 
-    
+    mgf_title: str = "mgf_title"
+
     @staticmethod
     def get_mgf_title_column(df: pl.DataFrame) -> str:
         for candidate in (
@@ -56,9 +56,9 @@ class Constants:
         ):
             if candidate in df.columns:
                 return candidate
-                
+
         return None
-    
+
     @staticmethod
     def get_aa_scores_column(df: pl.DataFrame) -> str:
         """
