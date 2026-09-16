@@ -30,6 +30,7 @@ import fire
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
+import re
 import tqdm
 
 from .align import align_tokens_with_gaps
