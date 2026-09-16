@@ -266,6 +266,10 @@ Compute and plot precision-coverage curves from PSM predictions.
 Build a precision-coverage DataFrame from predicted and ground-truth PSMs.
 Accepts a pre-built ground-truth DataFrame or the raw MGF and mzTab paths.
 
+Every residue token in the predicted and ground truth sequences must be in
+the residue map, or the command stops with an error naming the tokens; pass
+`--residues_path` with a file that includes them.
+
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--ground_truth_df` | path | `None` | Pre-built ground-truth DataFrame |

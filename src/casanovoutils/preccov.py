@@ -30,7 +30,6 @@ import fire
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-import re
 import tqdm
 
 from .align import align_tokens_with_gaps
@@ -241,15 +240,8 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
     return row
 
-def _extract_nterm_mod(token: str) -> tuple[str | None, str]:
-    """Splits a compound N-terminal token like '[Acetyl]-A' into ('[Acetyl]-', 'A')."""
-    match = re.match(r"^(\[[^\]]+\]-)(.+)$", token)
-    if match:
-        return match.group(1), match.group(2)
-    return None, token
 
 def _aa_match_prefix(
-    mgf_title: str,
     peptide1: list[str],
     peptide2: list[str],
     aa_dict: dict[str, float],
@@ -287,77 +279,29 @@ def _aa_match_prefix(
     pep_match : bool
         True when every position matches (full-sequence match).
     """
-    # 1. Expand compound N-terminal PTM tokens if present at the start of the lists
-    p1_processed = []
-    if peptide1:
-        mod, aa = _extract_nterm_mod(peptide1[0])
-        if mod:
-            p1_processed.extend([mod, aa])
-        else:
-            p1_processed.append(peptide1[0])
-    p1_processed.extend(peptide1[1:])
-
-    p2_processed = []
-    if peptide2:
-        mod, aa = _extract_nterm_mod(peptide2[0])
-        if mod:
-            p2_processed.extend([mod, aa])
-        else:
-            p2_processed.append(peptide2[0])
-    p2_processed.extend(peptide2[1:])
-
-    # Initialize matches tracking against the newly processed token lengths
-    aa_matches = np.zeros(max(len(p1_processed), len(p2_processed)), dtype=bool)
+    aa_matches = np.zeros(max(len(peptide1), len(peptide2)), dtype=bool)
     i1, i2, cum1, cum2 = 0, 0, 0.0, 0.0
-
-    while i1 < len(p1_processed) and i2 < len(p2_processed):
-        t1, t2 = p1_processed[i1], p2_processed[i2]
-
-        # Is this token a standalone PTM modification token? (e.g., "[Acetyl]-")
-        is_mod1 = t1.endswith('-') and t1.startswith('[')
-        is_mod2 = t2.endswith('-') and t2.startswith('[')
-
-        # Assign masses: Standalone modifications are assigned 0.0 Da if not in aa_dict
-        m1 = aa_dict.get(t1, 0.0)
-        m2 = aa_dict.get(t2, 0.0)
-        
-        m1_known = t1 in aa_dict or is_mod1
-        m2_known = t2 in aa_dict or is_mod2
-
-        if not m1_known:
-            raise ValueError(
-                f'encountered unexpected amino acid "{t1}" in {peptide1}. The spectra title is {mgf_title}.'
-            )
-        if not m2_known:
-            raise ValueError(
-                f'encountered unexpected amino acid "{t2}" in {peptide2}. The spectra title is {mgf_title}.'
-            )
-
+    while i1 < len(peptide1) and i2 < len(peptide2):
+        m1 = aa_dict.get(peptide1[i1], 0.0)
+        m2 = aa_dict.get(peptide2[i2], 0.0)
+        m1_known = peptide1[i1] in aa_dict
+        m2_known = peptide2[i2] in aa_dict
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            # Match condition: 
-            # Both are exact string matches OR both are known entities within mass tolerance
-            same_token = t1 == t2
-            
-            # If comparing a PTM token to an AA token, do not match by mass alone
-            type_match = (is_mod1 == is_mod2) 
-
-            aa_matches[max(i1, i2)] = same_token or (
-                type_match and abs(m1 - m2) < ind_mass_threshold
+            # Require both tokens to be known residues to count as a match;
+            # unknown tokens (mass defaulting to 0.0) must not match each other.
+            aa_matches[max(i1, i2)] = (
+                m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
             )
-            
             i1, i2 = i1 + 1, i2 + 1
             cum1, cum2 = cum1 + m1, cum2 + m2
         elif cum2 + m2 > cum1 + m1:
             i1, cum1 = i1 + 1, cum1 + m1
         else:
             i2, cum2 = i2 + 1, cum2 + m2
-
     return aa_matches, bool(aa_matches.all())
 
 
-
 def _aa_match_prefix_suffix(
-    mgf_title: str,
     peptide1: list[str],
     peptide2: list[str],
     aa_dict: dict[str, float],
@@ -371,7 +315,7 @@ def _aa_match_prefix_suffix(
     unmatched position, and the results are merged.
     """
     aa_matches, pep_match = _aa_match_prefix(
-        mgf_title, peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
+        peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
     if pep_match:
         return aa_matches, pep_match
@@ -383,19 +327,8 @@ def _aa_match_prefix_suffix(
         m2 = aa_dict.get(peptide2[i2], 0.0)
         m1_known = peptide1[i1] in aa_dict
         m2_known = peptide2[i2] in aa_dict
-
-        if not m1_known:
-            raise ValueError(
-                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}. The spectra title is {mgf_title}.'
-            )
-        if not m2_known:
-            raise ValueError(
-                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
-            )
-
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            same_token = peptide1[i1] == peptide2[i2]
-            aa_matches[max(i1, i2)] = same_token or (
+            aa_matches[max(i1, i2)] = (
                 m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
             )
             i1, i2 = i1 - 1, i2 - 1
@@ -408,7 +341,6 @@ def _aa_match_prefix_suffix(
 
 
 def _aa_match_batch(
-    mgf_titles: list,
     peptides1: list,
     peptides2: list,
     aa_dict: dict[str, float],
@@ -444,7 +376,7 @@ def _aa_match_batch(
     """
     results: list[tuple[np.ndarray, bool]] = []
     n_aa1, n_aa2 = 0, 0
-    for title, p1, p2 in zip(mgf_titles, peptides1, peptides2, strict=True):
+    for p1, p2 in zip(peptides1, peptides2, strict=True):
         # A string is one exploded residue, not a sequence. Splitting it on
         # uppercase letters would turn "M[Oxidation]" into "M[" and "Oxidation]".
         if isinstance(p1, str):
@@ -464,7 +396,7 @@ def _aa_match_batch(
         n_aa2 += len(p2)
         results.append(
             _aa_match_prefix_suffix(
-                title, p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold
+                p1, p2, aa_dict, cum_mass_threshold, ind_mass_threshold
             )
         )
     return results, n_aa1, n_aa2
@@ -510,28 +442,61 @@ def calc_precision_coverage(
         The input DataFrame sorted by ``score_col`` with three additional
         columns: ``"pc_is_correct"`` (bool), ``"pc_precision"`` (float),
         and ``"pc_coverage"`` (float).
+    Raises
+    ------
+    ValueError
+        If any token in the predicted or ground truth sequences is missing from
+        the residue map. A fused N-terminal token such as ``"[Acetyl]-A"`` is
+        accepted when both halves are known.
     """
     logging.debug("Computing precision-coverage using score column '%s'", score_col)
 
     pc_df = pc_df.sort(score_col, descending=True)
 
-    aa_dict = get_residues(residues_path)
+    aa_dict = dict(get_residues(residues_path))
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
-    title_col = Constants.get_mgf_title_column(pc_df)
 
-    if title_col is not None:
-        mgf_titles = pc_df.get_column(title_col).to_list()
-    else:
-        mgf_titles = [f"spectra {i}" for i in range(pc_df.height)]
+    # Casanovo folds the N-terminal modification's score into the first
+    # residue, so tokenization fuses them too ("[Carbamyl]-L"). Give each
+    # fused token the summed mass of its two halves.
+    seen = {
+        t
+        for row in pred_tokens + truth_tokens
+        for t in ([row] if isinstance(row, str) else row)
+    }
+    for token in seen - aa_dict.keys():
+        head, sep, residue = token.partition("]-")
+        if sep and head + sep in aa_dict and residue in aa_dict:
+            aa_dict[token] = aa_dict[head + sep] + aa_dict[residue]
+
+    unknown = seen - aa_dict.keys() - {"-", ""}
+    if unknown:
+        id_col = Constants.get_spectrum_id_column(pc_df)
+        bad = (
+            pc_df.filter(
+                pl.col(Constants.predicted_tokens)
+                .list.eval(pl.element().is_in(unknown))
+                .list.any()
+                | pl.col(Constants.ground_truth_tokens)
+                .list.eval(pl.element().is_in(unknown))
+                .list.any()
+            )
+            if isinstance(pred_tokens[0], list)
+            else pc_df.filter(
+                pl.col(Constants.predicted_tokens).is_in(unknown)
+                | pl.col(Constants.ground_truth_tokens).is_in(unknown)
+            )
+        )
+        where = f"{id_col}={bad[id_col][0]}" if id_col else f"row {bad.height}"
+        raise ValueError(
+            f"{bad.height} spectra contain tokens missing from the residue map "
+            f"({sorted(unknown)}); first at {where}. Add them to the file passed "
+            "with --residues_path."
+        )
 
     batch, _, _ = _aa_match_batch(
-        mgf_titles,
-        pred_tokens,
-        truth_tokens,
-        aa_dict,
-        cum_mass_threshold,
-        ind_mass_threshold,
+        pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
     pep_matches = np.array([m[1] for m in batch], dtype=bool)
     pc_df = pc_df.with_columns(pl.Series("pc_is_correct", pep_matches))

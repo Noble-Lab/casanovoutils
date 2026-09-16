@@ -2,6 +2,8 @@
 Shared constants for column names and sentinel values used across the package.
 """
 
+from typing import Optional
+
 import polars as pl
 
 
@@ -45,18 +47,13 @@ class Constants:
     predicted_tokens: str = "mztab_tokens"
     ground_truth_tokens: str = "mgf_tokens"
     min_score: float = -1.0
-    mgf_title: str = "mgf_title"
 
     @staticmethod
-    def get_mgf_title_column(df: pl.DataFrame) -> str:
-        for candidate in (
-            Constants.mgf_title,
-            "mgf_scans",
-            "mgf_scan",
-        ):
+    def get_spectrum_id_column(df: pl.DataFrame) -> Optional[str]:
+        """Return the first column present that identifies a spectrum, or None."""
+        for candidate in ("mztab_spectra_ref", "mgf_title", "mgf_scans", "mgf_scan"):
             if candidate in df.columns:
                 return candidate
-
         return None
 
     @staticmethod
