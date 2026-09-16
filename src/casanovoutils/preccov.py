@@ -240,6 +240,12 @@ def mutate_row_as_dict(tie_break_suffix: bool, row: dict[str, Any]) -> dict[str,
 
     return row
 
+def _extract_nterm_mod(token: str) -> tuple[str | None, str]:
+    """Splits a compound N-terminal token like '[Acetyl]-A' into ('[Acetyl]-', 'A')."""
+    match = re.match(r"^(\[[^\]]+\]-)(.+)$", token)
+    if match:
+        return match.group(1), match.group(2)
+    return None, token
 
 def _aa_match_prefix(
     mgf_title: str,
@@ -280,40 +286,73 @@ def _aa_match_prefix(
     pep_match : bool
         True when every position matches (full-sequence match).
     """
-    aa_matches = np.zeros(max(len(peptide1), len(peptide2)), dtype=bool)
+    # 1. Expand compound N-terminal PTM tokens if present at the start of the lists
+    p1_processed = []
+    if peptide1:
+        mod, aa = _extract_nterm_mod(peptide1[0])
+        if mod:
+            p1_processed.extend([mod, aa])
+        else:
+            p1_processed.append(peptide1[0])
+    p1_processed.extend(peptide1[1:])
+
+    p2_processed = []
+    if peptide2:
+        mod, aa = _extract_nterm_mod(peptide2[0])
+        if mod:
+            p2_processed.extend([mod, aa])
+        else:
+            p2_processed.append(peptide2[0])
+    p2_processed.extend(peptide2[1:])
+
+    # Initialize matches tracking against the newly processed token lengths
+    aa_matches = np.zeros(max(len(p1_processed), len(p2_processed)), dtype=bool)
     i1, i2, cum1, cum2 = 0, 0, 0.0, 0.0
-    while i1 < len(peptide1) and i2 < len(peptide2):
-        m1 = aa_dict.get(peptide1[i1], 0.0)
-        m2 = aa_dict.get(peptide2[i2], 0.0)
-        m1_known = peptide1[i1] in aa_dict
-        m2_known = peptide2[i2] in aa_dict
+
+    while i1 < len(p1_processed) and i2 < len(p2_processed):
+        t1, t2 = p1_processed[i1], p2_processed[i2]
+
+        # Is this token a standalone PTM modification token? (e.g., "[Acetyl]-")
+        is_mod1 = t1.endswith('-') and t1.startswith('[')
+        is_mod2 = t2.endswith('-') and t2.startswith('[')
+
+        # Assign masses: Standalone modifications are assigned 0.0 Da if not in aa_dict
+        m1 = aa_dict.get(t1, 0.0)
+        m2 = aa_dict.get(t2, 0.0)
+        
+        m1_known = t1 in aa_dict or is_mod1
+        m2_known = t2 in aa_dict or is_mod2
 
         if not m1_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide1[i1]}" in {peptide1}. The spectra title is {mgf_title}.'
+                f'encountered unexpected amino acid "{t1}" in {peptide1}. The spectra title is {mgf_title}.'
             )
         if not m2_known:
             raise ValueError(
-                f'encountered unexpected amino acid "{peptide2[i2]}" in {peptide2}. The spectra title is {mgf_title}.'
+                f'encountered unexpected amino acid "{t2}" in {peptide2}. The spectra title is {mgf_title}.'
             )
 
         if abs((cum1 + m1) - (cum2 + m2)) < cum_mass_threshold:
-            # Two tokens match when they are string-equal (handles compound
-            # N-terminal tokens like "[Acetyl]-A" that are absent from aa_dict)
-            # OR when both are known residues whose masses agree within tolerance.
-            # Unknown tokens that differ must not match each other (e.g. "B" vs
-            # "X" both have mass 0.0 but are different residues).
-            same_token = peptide1[i1] == peptide2[i2]
+            # Match condition: 
+            # Both are exact string matches OR both are known entities within mass tolerance
+            same_token = t1 == t2
+            
+            # If comparing a PTM token to an AA token, do not match by mass alone
+            type_match = (is_mod1 == is_mod2) 
+
             aa_matches[max(i1, i2)] = same_token or (
-                m1_known and m2_known and abs(m1 - m2) < ind_mass_threshold
+                type_match and abs(m1 - m2) < ind_mass_threshold
             )
+            
             i1, i2 = i1 + 1, i2 + 1
             cum1, cum2 = cum1 + m1, cum2 + m2
         elif cum2 + m2 > cum1 + m1:
             i1, cum1 = i1 + 1, cum1 + m1
         else:
             i2, cum2 = i2 + 1, cum2 + m2
+
     return aa_matches, bool(aa_matches.all())
+
 
 
 def _aa_match_prefix_suffix(
