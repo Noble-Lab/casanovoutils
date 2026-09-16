@@ -331,7 +331,7 @@ def _aa_match_prefix_suffix(
     unmatched position, and the results are merged.
     """
     aa_matches, pep_match = _aa_match_prefix(
-        peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
+        mgf_title, peptide1, peptide2, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
     if pep_match:
         return aa_matches, pep_match
@@ -478,7 +478,13 @@ def calc_precision_coverage(
     aa_dict = get_residues(residues_path)
     pred_tokens = pc_df.get_column(Constants.predicted_tokens).to_list()
     truth_tokens = pc_df.get_column(Constants.ground_truth_tokens).to_list()
-    mgf_titles = pc_df.get_column(Constants.mgf_title).to_list()
+    title_col = Constants.get_mgf_title_column(pc_df)
+  
+    if title_col is not None:
+        mgf_titles = pc_df.get_column(title_col).to_list()
+    else:
+        mgf_titles = [f"spectra {i}" for i in range(pc_df.height)]
+      
     batch, _, _ = _aa_match_batch(
         mgf_titles, pred_tokens, truth_tokens, aa_dict, cum_mass_threshold, ind_mass_threshold
     )
