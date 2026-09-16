@@ -191,14 +191,57 @@ def purge_redundant(
     list[PyteomicsSpectrum]
         Spectra with redundant peaks removed and peaks sorted by m/z.
     """
-    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
-    logging.info("Purging redundant peaks with epsilon=%g Da", epsilon)
-    spectra = iter_spectra(spectra, desc="Purging redundant peaks")
-    spectra = map(lambda s: remove_redundant_peaks(s, epsilon), spectra)
-    spectra = list(spectra)
-    write_spectra(spectra, outfile)
+    file_handler = configure_logging(
+        pathlib.Path(outfile).with_suffix(".log") if outfile else None
+    )
+    try:
+        logging.info("Purging redundant peaks with epsilon=%g Da", epsilon)
+        spectra = iter_spectra(spectra, desc="Purging redundant peaks")
+        spectra = map(lambda s: remove_redundant_peaks(s, epsilon), spectra)
+        spectra = list(spectra)
+        write_spectra(spectra, outfile)
+        return spectra
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
-    return spectra
+
+def _iter_raw_blocks(paths: Iterable[PathLike]) -> Iterable[str]:
+    """Yield raw MGF text blocks from one or more file paths without parsing.
+
+    Lines before the first ``BEGIN IONS`` (global MGF header parameters) are
+    not preserved. This is intentional: global headers are uncommon in practice
+    and the fast path is not a drop-in replacement for the pyteomics round-trip
+    in their presence.
+
+    Malformed entries (a ``BEGIN IONS`` that is never closed, or a second
+    ``BEGIN IONS`` before ``END IONS``) are logged as warnings and skipped.
+    """
+    for path in paths:
+        with open(path) as f:
+            block: list[str] = []
+            for line in f:
+                if line.strip() == "BEGIN IONS":
+                    if block:
+                        logging.warning(
+                            "Malformed MGF in %s: new BEGIN IONS before END IONS"
+                            " — skipping incomplete block",
+                            path,
+                        )
+                    block = [line]
+                elif line.strip() == "END IONS":
+                    block.append(line)
+                    yield "".join(block)
+                    block = []
+                elif block:
+                    block.append(line)
+            if block:
+                logging.warning(
+                    "Malformed MGF in %s: file ended without END IONS"
+                    " — skipping incomplete block",
+                    path,
+                )
 
 
 def shuffle(
@@ -208,6 +251,14 @@ def shuffle(
 ) -> list[PyteomicsSpectrum]:
     """
     Read all spectra and return them in a shuffled order.
+
+    When *spectra* is a file path (or iterable of file paths) and *outfile* is
+    provided, a fast raw-text path is used: entries are shuffled as opaque
+    strings without parsing peaks, which is significantly faster than the
+    pyteomics parse/serialize round-trip.  Note that the fast path does not
+    preserve MGF global header parameters (lines before the first
+    ``BEGIN IONS``); use the slow path (pass parsed spectra) if your files
+    rely on global defaults.
 
     Parameters
     ----------
@@ -221,18 +272,61 @@ def shuffle(
     Returns
     -------
     list[PyteomicsSpectrum]
-        All spectra in shuffled order.
+        All spectra in shuffled order, or an empty list when the fast raw-text
+        path is used (output was written directly to *outfile*).
     """
-    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
+    file_handler = configure_logging(
+        pathlib.Path(outfile).with_suffix(".log") if outfile else None
+    )
+    try:
+        logging.info("Shuffling spectra (random_seed=%d)", random_seed)
+        random.seed(random_seed)
 
-    logging.info("Shuffling spectra (random_seed=%d)", random_seed)
-    random.seed(random_seed)
+        # Fast path: avoid pyteomics parse/serialize when input is file path(s).
+        if outfile is not None:
+            if isinstance(spectra, (str, os.PathLike)):
+                paths: list[PathLike] = [spectra]
+                use_raw = True
+            else:
+                it = iter(spectra)
+                try:
+                    first = next(it)
+                except StopIteration:
+                    open(outfile, "w").close()
+                    return []
+                if isinstance(first, (str, os.PathLike)):
+                    paths = list(itertools.chain([first], it))
+                    use_raw = True
+                else:
+                    spectra = itertools.chain([first], it)
+                    use_raw = False
 
-    result = list(iter_spectra(spectra, desc="Reading spectra"))
-    random.shuffle(result)
-    logging.info("Shuffled %d spectra", len(result))
-    write_spectra(result, outfile)
-    return result
+            if use_raw:
+                blocks = list(
+                    tqdm.tqdm(
+                        _iter_raw_blocks(paths), desc="Reading spectra", unit="psm"
+                    )
+                )
+                random.shuffle(blocks)
+                logging.info("Shuffled %d spectra", len(blocks))
+                with open(outfile, "w") as f:
+                    for block in tqdm.tqdm(
+                        blocks, desc=f"Writing {outfile}", unit="psm"
+                    ):
+                        f.write(block)
+                        if not block.endswith("\n"):
+                            f.write("\n")
+                return []
+
+        result = list(iter_spectra(spectra, desc="Reading spectra"))
+        random.shuffle(result)
+        logging.info("Shuffled %d spectra", len(result))
+        write_spectra(result, outfile)
+        return result
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
 
 def pipeline(
@@ -272,34 +366,42 @@ def pipeline(
     list[PyteomicsSpectrum]
         Processed spectra.
     """
-    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
-
-    stages = []
-    if do_shuffle:
-        stages.append("shuffle")
-    if downsample_k is not None:
-        stages.append(f"spectra-per-peptide(k={downsample_k})")
-    if purge_epsilon is not None:
-        stages.append(f"purge-redundant(epsilon={purge_epsilon})")
-    logging.info(
-        "Running pipeline stages: %s", " -> ".join(stages) if stages else "none"
+    file_handler = configure_logging(
+        pathlib.Path(outfile).with_suffix(".log") if outfile else None
     )
+    try:
+        stages = []
+        if do_shuffle:
+            stages.append("shuffle")
+        if downsample_k is not None:
+            stages.append(f"spectra-per-peptide(k={downsample_k})")
+        if purge_epsilon is not None:
+            stages.append(f"purge-redundant(epsilon={purge_epsilon})")
+        logging.info(
+            "Running pipeline stages: %s", " -> ".join(stages) if stages else "none"
+        )
 
-    result: SpectraInput = spectra
+        result: SpectraInput = spectra
 
-    if do_shuffle:
-        result = shuffle(result, random_seed=random_seed)
+        if do_shuffle:
+            result = shuffle(result, random_seed=random_seed)
 
-    if downsample_k is not None:
-        result = spectra_per_peptide(result, k=downsample_k, random_seed=random_seed)
+        if downsample_k is not None:
+            result = spectra_per_peptide(
+                result, k=downsample_k, random_seed=random_seed
+            )
 
-    if purge_epsilon is not None:
-        result = purge_redundant(result, epsilon=purge_epsilon)
-    else:
-        result = list(iter_spectra(result))
+        if purge_epsilon is not None:
+            result = purge_redundant(result, epsilon=purge_epsilon)
+        else:
+            result = list(iter_spectra(result))
 
-    write_spectra(result, outfile)
-    return result
+        write_spectra(result, outfile)
+        return result
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
 
 _VALID_DOWNSAMPLE_TYPES = frozenset({"number", "proportion"})
@@ -375,38 +477,47 @@ def spectra_per_peptide(
     """
     if not isinstance(k, int) or k < 1:
         raise ValueError(f"--k must be a positive integer, got {k!r}.")
-    configure_logging(pathlib.Path(outfile).with_suffix(".log") if outfile else None)
-    logging.info(
-        "Sampling up to k=%d spectra per %s (precursor=%s, ignore_mods=%s, "
-        "random_seed=%d)",
-        k,
-        "precursor" if precursor else "peptide",
-        precursor,
-        ignore_mods,
-        random_seed,
+    file_handler = configure_logging(
+        pathlib.Path(outfile).with_suffix(".log") if outfile else None
     )
+    try:
+        logging.info(
+            "Sampling up to k=%d spectra per %s (precursor=%s, ignore_mods=%s, "
+            "random_seed=%d)",
+            k,
+            "precursor" if precursor else "peptide",
+            precursor,
+            ignore_mods,
+            random_seed,
+        )
 
-    rng = random.Random(random_seed)
-    reservoir: dict = {}
-    counts: dict = {}
+        rng = random.Random(random_seed)
+        reservoir: dict = {}
+        counts: dict = {}
 
-    for spectrum in iter_spectra(spectra, desc="Streaming spectra", miniters=100_000):
-        key = _group_key(spectrum, precursor=precursor, ignore_mods=ignore_mods)
-        count = counts.get(key, 0) + 1
-        counts[key] = count
-        if count <= k:
-            reservoir.setdefault(key, []).append(spectrum)
-        else:
-            j = rng.randint(0, count - 1)
-            if j < k:
-                reservoir[key][j] = spectrum
+        for spectrum in iter_spectra(
+            spectra, desc="Streaming spectra", miniters=100_000
+        ):
+            key = _group_key(spectrum, precursor=precursor, ignore_mods=ignore_mods)
+            count = counts.get(key, 0) + 1
+            counts[key] = count
+            if count <= k:
+                reservoir.setdefault(key, []).append(spectrum)
+            else:
+                j = rng.randint(0, count - 1)
+                if j < k:
+                    reservoir[key][j] = spectrum
 
-    result = list(itertools.chain.from_iterable(reservoir.values()))
-    logging.info(
-        "Retained %d spectra from %d unique groups", len(result), len(reservoir)
-    )
-    write_spectra(result, outfile)
-    return result
+        result = list(itertools.chain.from_iterable(reservoir.values()))
+        logging.info(
+            "Retained %d spectra from %d unique groups", len(result), len(reservoir)
+        )
+        write_spectra(result, outfile)
+        return result
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
 
 def downsample_spectra(
@@ -439,69 +550,75 @@ def downsample_spectra(
     random_seed : int, default 42
         Seed for the random number generator.
     """
-    configure_logging(pathlib.Path(output_file).with_suffix(".log"))
-
-    if pathlib.Path(input_file).resolve() == pathlib.Path(output_file).resolve():
-        raise ValueError(
-            "input_file and output_file must be different paths; "
-            "overwriting the input in-place is not supported."
-        )
-
-    if downsample_type not in _VALID_DOWNSAMPLE_TYPES:
-        raise ValueError(
-            f"--downsample_type must be one of {sorted(_VALID_DOWNSAMPLE_TYPES)}, "
-            f"got {downsample_type!r}."
-        )
-
-    if downsample_type == "number":
-        if (
-            not np.isfinite(downsample_rate)
-            or downsample_rate != int(downsample_rate)
-            or int(downsample_rate) < 1
-        ):
+    file_handler = configure_logging(pathlib.Path(output_file).with_suffix(".log"))
+    try:
+        if pathlib.Path(input_file).resolve() == pathlib.Path(output_file).resolve():
             raise ValueError(
-                "--downsample_rate must be a positive integer when "
-                f"--downsample_type is 'number', got {downsample_rate!r}."
-            )
-    else:
-        if not (0 < downsample_rate <= 1):
-            raise ValueError(
-                "--downsample_rate must be in (0, 1] when "
-                f"--downsample_type is '{downsample_type}', "
-                f"got {downsample_rate!r}."
+                "input_file and output_file must be different paths; "
+                "overwriting the input in-place is not supported."
             )
 
-    rng = random.Random(random_seed)
+        if downsample_type not in _VALID_DOWNSAMPLE_TYPES:
+            raise ValueError(
+                f"--downsample_type must be one of {sorted(_VALID_DOWNSAMPLE_TYPES)}, "
+                f"got {downsample_type!r}."
+            )
 
-    # First pass: count total spectra.
-    with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
-        n = sum(1 for _ in tqdm.tqdm(reader, desc="Counting spectra", unit="spectrum"))
-
-    if downsample_type == "number":
-        k = min(int(downsample_rate), n)
-    else:
-        k = min(round(n * downsample_rate), n)
-
-    pct = k / n if n > 0 else 0.0
-    logging.info("Targeting %d of %d spectra (%.1f%%)", k, n, 100 * pct)
-
-    # Second pass: stream with adaptive acceptance probability.
-    needed = k
-    remaining = n
-
-    def _filtered():
-        nonlocal needed, remaining
-        with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
-            for spectrum in tqdm.tqdm(
-                reader, desc="Streaming spectra", unit="spectrum"
+        if downsample_type == "number":
+            if (
+                not np.isfinite(downsample_rate)
+                or downsample_rate != int(downsample_rate)
+                or int(downsample_rate) < 1
             ):
-                if needed > 0 and rng.random() < needed / remaining:
-                    needed -= 1
-                    yield spectrum
-                remaining -= 1
+                raise ValueError(
+                    "--downsample_rate must be a positive integer when "
+                    f"--downsample_type is 'number', got {downsample_rate!r}."
+                )
+        else:
+            if not (0 < downsample_rate <= 1):
+                raise ValueError(
+                    "--downsample_rate must be in (0, 1] when "
+                    f"--downsample_type is '{downsample_type}', "
+                    f"got {downsample_rate!r}."
+                )
 
-    pyteomics.mgf.write(_filtered(), output=str(output_file))
-    logging.info("Done writing %s", output_file)
+        rng = random.Random(random_seed)
+
+        # First pass: count total spectra.
+        with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
+            n = sum(
+                1 for _ in tqdm.tqdm(reader, desc="Counting spectra", unit="spectrum")
+            )
+
+        if downsample_type == "number":
+            k = min(int(downsample_rate), n)
+        else:
+            k = min(round(n * downsample_rate), n)
+
+        pct = k / n if n > 0 else 0.0
+        logging.info("Targeting %d of %d spectra (%.1f%%)", k, n, 100 * pct)
+
+        # Second pass: stream with adaptive acceptance probability.
+        needed = k
+        remaining = n
+
+        def _filtered():
+            nonlocal needed, remaining
+            with pyteomics.mgf.read(str(input_file), use_index=False) as reader:
+                for spectrum in tqdm.tqdm(
+                    reader, desc="Streaming spectra", unit="spectrum"
+                ):
+                    if needed > 0 and rng.random() < needed / remaining:
+                        needed -= 1
+                        yield spectrum
+                    remaining -= 1
+
+        pyteomics.mgf.write(_filtered(), output=str(output_file))
+        logging.info("Done writing %s", output_file)
+    finally:
+        if file_handler is not None:
+            logging.root.removeHandler(file_handler)
+            file_handler.close()
 
 
 COMMANDS: Commands = {

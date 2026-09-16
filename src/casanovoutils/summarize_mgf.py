@@ -46,6 +46,7 @@ Requires: pyteomics, spectrum_utils, numpy, matplotlib
 import csv
 import html as html_mod
 import os
+import re
 import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
@@ -89,6 +90,20 @@ def _make_charge_fig(counts: dict) -> plt.Figure:
     ax.set_xlabel("Charge state")
     ax.set_ylabel("Number of spectra")
     ax.set_title(f"Charge state distribution (n={total:,})")
+    fig.tight_layout()
+    return fig
+
+
+def _make_cterm_bar_fig(counts: Counter) -> plt.Figure:
+    """Create a horizontal bar chart for C-terminal amino acid counts."""
+    total = sum(counts.values())
+    tokens = sorted(counts, key=lambda t: -counts[t])
+    vals = [counts[t] for t in tokens]
+    fig, ax = plt.subplots(figsize=(7, min(max(3, 0.4 * len(tokens)), 12)))
+    ax.barh(tokens[::-1], vals[::-1], edgecolor="black", linewidth=0.5)
+    ax.set_xlabel("Number of PSMs")
+    ax.set_ylabel("C-terminal residue")
+    ax.set_title(f"C-terminal amino acid distribution (n={total:,})")
     fig.tight_layout()
     return fig
 
@@ -179,6 +194,43 @@ def _median_from_bins(bin_counts: np.ndarray, bin_edges: np.ndarray) -> float:
         if cumsum >= mid:
             return float((bin_edges[i] + bin_edges[i + 1]) / 2)
     return float((bin_edges[-2] + bin_edges[-1]) / 2)
+
+
+# ---------------------------------------------------------------------------
+# C-terminal token extraction
+# ---------------------------------------------------------------------------
+
+# Matches a trailing ProForma C-terminal sequence tag, e.g. "-[Amidated]".
+_CTERM_TAG_RE = re.compile(r"-\[[^\]]*\]$")
+
+# Matches the last residue token in a ProForma sequence: an uppercase letter
+# optionally followed by one or more bracketed modification labels,
+# e.g. "K", "K[+229.163]", "K[Acetyl][+229.163]".
+_LAST_RESIDUE_RE = re.compile(r"([A-Z](?:\[[^\]]*\])*)$")
+
+
+def _extract_cterm_token(seq: str) -> str | None:
+    """Return the C-terminal residue token from a ProForma sequence string.
+
+    Includes any modification labels attached to that residue (e.g.
+    ``"K[+229.163]"``).  C-terminal sequence tags (``"-[mod]"``) are
+    stripped before extraction.  Returns ``None`` if the sequence is empty
+    or the last token cannot be identified.
+
+    Parameters
+    ----------
+    seq : str
+        Peptide sequence in ProForma notation.
+
+    Returns
+    -------
+    str or None
+        The last residue token, e.g. ``"K"``, ``"K[+229.163]"``, or
+        ``None`` if extraction fails.
+    """
+    seq = _CTERM_TAG_RE.sub("", seq)
+    m = _LAST_RESIDUE_RE.search(seq)
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +456,14 @@ def peptide_lengths(
             file=sys.stderr,
         )
 
+    if not lengths:
+        print(
+            "Error: no spectra with valid SEQ= in ProForma notation found."
+            " Nothing to output.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     counts_map = Counter(lengths)
 
     # -- TSV output (sorted by length) ----------------------------------------
@@ -427,6 +487,100 @@ def peptide_lengths(
             title=title,
             integer_bins=True,
         )
+        fig.savefig(output_plot, dpi=150)
+        plt.close(fig)
+        print(f"Wrote {output_plot}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# C-terminal amino acid distribution
+# ---------------------------------------------------------------------------
+
+
+def count_cterm_aas(spectra: Iterable) -> tuple[Counter, int]:
+    """Count C-terminal residue tokens across annotated spectra at PSM level.
+
+    The full residue token is used, including any modification label (e.g.
+    ``"K[+229.163]"`` is tallied separately from ``"K"``).
+
+    Parameters
+    ----------
+    spectra : Iterable
+        Iterable of pyteomics spectrum dicts.
+
+    Returns
+    -------
+    counts : Counter[str]
+        Mapping of C-terminal residue token to PSM count.
+    n_skipped : int
+        Number of spectra skipped (missing ``SEQ=``, invalid ProForma, or
+        unrecognisable C-terminal token).
+    """
+    counts: Counter[str] = Counter()
+    n_skipped = 0
+    for spectrum in spectra:
+        seq = spectrum["params"].get("seq", "")
+        if not seq:
+            n_skipped += 1
+            continue
+        try:
+            pyteomics_proforma.parse(seq)
+        except Exception:
+            n_skipped += 1
+            continue
+        token = _extract_cterm_token(seq)
+        if token is None:
+            n_skipped += 1
+            continue
+        counts[token] += 1
+    return counts, n_skipped
+
+
+def cterm_aa_distribution(
+    mgf_file: PathLike,
+    output_tsv: PathLike = "cterm_aas.tsv",
+    output_plot: PathLike = "cterm_aas.png",
+) -> None:
+    """C-terminal amino acid distribution for annotated spectra in an MGF file.
+
+    Counts at PSM level (one tally per spectrum, not per unique peptide).
+    The full residue token is used, including any modification label (e.g.
+    ``K[+229.163]`` is counted separately from ``K``).  Spectra without a
+    ``SEQ=`` field are skipped.
+
+    Parameters
+    ----------
+    mgf_file : PathLike
+        Input MGF file (requires ``SEQ=`` in ProForma notation).
+    output_tsv : PathLike
+        Output TSV path (default: cterm_aas.tsv).
+    output_plot : PathLike
+        Output horizontal bar chart path (default: cterm_aas.png).
+    """
+    with mgf.MGF(mgf_file) as reader:
+        counts, n_skipped = count_cterm_aas(reader)
+
+    total = sum(counts.values())
+    print(f"Processed {total + n_skipped} spectra total.", file=sys.stderr)
+    if n_skipped:
+        print(
+            f"  Warning: {n_skipped} spectra without SEQ= or with invalid"
+            " ProForma sequences were skipped.",
+            file=sys.stderr,
+        )
+
+    # -- TSV output (sorted by count descending) ------------------------------
+    with open(output_tsv, "w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["amino_acid", "count", "percentage"])
+        for token in sorted(counts, key=lambda t: -counts[t]):
+            pct = 100.0 * counts[token] / total if total else 0.0
+            w.writerow([token, counts[token], f"{pct:.2f}"])
+    print(f"Wrote {output_tsv}", file=sys.stderr)
+
+    # -- Bar chart ------------------------------------------------------------
+    if counts:
+        fig = _make_cterm_bar_fig(counts)
         fig.savefig(output_plot, dpi=150)
         plt.close(fig)
         print(f"Wrote {output_plot}", file=sys.stderr)
@@ -761,6 +915,15 @@ def fragment_coverage(
     print(f"Processed {count} spectra total.", file=sys.stderr)
     print(f"  {len(results)} scored, {n_skipped} skipped.", file=sys.stderr)
 
+    if not results:
+        print(
+            "Error: no spectra could be scored (all were skipped due to"
+            " missing SEQ=, invalid ProForma, or missing/ambiguous charge)."
+            " Nothing to output.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # -- Full per-spectrum TSV (in input order) --------------------------------
     with open(output_full_tsv, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
@@ -823,6 +986,8 @@ def _build_summary_html(
     coverage_png: str | None,
     coverage_stats: dict | None,
     mod_counts: Counter | None = None,
+    cterm_counts: Counter | None = None,
+    cterm_png: str | None = None,
     tolerance: float = 0.05,
     tolerance_unit: str = "Da",
     max_charge: str = "1less",
@@ -896,6 +1061,21 @@ def _build_summary_html(
             lengths_html = "<p class='note'>No annotated spectra.</p>"
         lengths_section = f"<h2>Peptide Lengths</h2>{lengths_html}{_img(lengths_png)}"
 
+    cterm_section = ""
+    if cterm_png is not None and cterm_counts:
+        total_cterm = sum(cterm_counts.values())
+        cterm_rows = sorted(cterm_counts.items(), key=lambda x: -x[1])
+        cterm_table = _table(
+            ["Residue", "Count", "Percentage"],
+            [
+                (token, f"{count:,}", f"{100.0 * count / total_cterm:.2f}%")
+                for token, count in cterm_rows
+            ],
+        )
+        cterm_section = (
+            f"<h2>C-terminal Amino Acids</h2>" f"{cterm_table}" f"{_img(cterm_png)}"
+        )
+
     coverage_section = ""
     if coverage_png is not None:
         max_charge_label = (
@@ -962,6 +1142,7 @@ def _build_summary_html(
 {peaks_html}
 {peaks_img}
 {lengths_section}
+{cterm_section}
 {coverage_section}
 </body>
 </html>"""
@@ -1054,6 +1235,7 @@ def summarize_mgf(
             charge_counts: Counter[int] = Counter()
             peak_counts_counter: Counter[int] = Counter()
             length_counts: Counter[int] = Counter()
+            cterm_counts: Counter[str] = Counter()
 
             mod_counts: Counter[tuple[str, str]] = Counter()
 
@@ -1085,6 +1267,7 @@ def summarize_mgf(
                         continue
 
                     n_with_seq += 1
+
                     try:
                         parsed_seq, props = pyteomics_proforma.parse(seq)
                         length_counts[len(parsed_seq)] += 1
@@ -1095,6 +1278,10 @@ def summarize_mgf(
                             mod_counts[("N-term", str(mod))] += 1
                         for mod in props.get("c_term") or []:
                             mod_counts[("C-term", str(mod))] += 1
+                        # C-terminal residue token (only for valid ProForma seqs)
+                        cterm_token = _extract_cterm_token(seq)
+                        if cterm_token is not None:
+                            cterm_counts[cterm_token] += 1
                     except Exception:
                         n_parse_errors += 1
 
@@ -1191,6 +1378,22 @@ def summarize_mgf(
                     ["length", "count"],
                     [(ln, length_counts[ln]) for ln in sorted(length_counts)],
                 )
+            if cterm_counts:
+                total_cterm = sum(cterm_counts.values())
+                _write_tsv(
+                    os.path.join(output_root, "cterm_aas.tsv"),
+                    ["amino_acid", "count", "percentage"],
+                    [
+                        (
+                            token,
+                            cterm_counts[token],
+                            f"{100.0 * cterm_counts[token] / total_cterm:.2f}",
+                        )
+                        for token in sorted(
+                            cterm_counts, key=lambda t: -cterm_counts[t]
+                        )
+                    ],
+                )
             if cov_n > 0:
                 cov_tsv_path = os.path.join(output_root, "fragment_coverage.tsv")
                 _write_tsv(
@@ -1256,6 +1459,13 @@ def summarize_mgf(
                     "peptide_lengths.png",
                 )
 
+            cterm_png: str | None = None
+            if cterm_counts:
+                cterm_png = _save_fig(
+                    _make_cterm_bar_fig(cterm_counts),
+                    "cterm_aas.png",
+                )
+
             coverage_png: str | None = None
             if cov_n > 0 and coverage_stats:
                 coverage_png = _save_fig(
@@ -1287,6 +1497,8 @@ def summarize_mgf(
                 coverage_png=coverage_png,
                 coverage_stats=coverage_stats,
                 mod_counts=mod_counts,
+                cterm_counts=cterm_counts,
+                cterm_png=cterm_png,
                 tolerance=tolerance,
                 tolerance_unit=tolerance_unit,
                 max_charge=max_charge,
@@ -1311,6 +1523,7 @@ def summarize_mgf(
 COMMANDS = {
     "summarize": summarize_mgf,
     "charge-distribution": charge_distribution,
+    "count-cterm-aas": cterm_aa_distribution,
     "fragment-coverage": fragment_coverage,
     "peak-counts": peak_counts,
     "peptide-lengths": peptide_lengths,
