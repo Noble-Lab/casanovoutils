@@ -3,6 +3,7 @@ Shared constants for column names and sentinel values used across the package.
 """
 
 from typing import Optional
+import logging
 
 import polars as pl
 
@@ -104,7 +105,8 @@ class Constants:
 
         Checks for ProForma-formatted prediction columns first (preferred,
         because they carry modification annotations), falling back to the
-        plain mzTab sequence column if none is found.
+        plain mzTab sequence column if none is found. The fallback logs a
+        warning, since ``mztab_sequence`` has no modification annotations.
 
         Two ProForma column naming conventions are supported:
 
@@ -131,4 +133,9 @@ class Constants:
             return cv_col
         if "mztab_opt_ms_run[1]_proforma" in df.columns:
             return "mztab_opt_ms_run[1]_proforma"
+        logging.warning(
+            "No ProForma prediction column found. Using 'mztab_sequence', which "
+            "has no modification annotations, so modified peptides are scored "
+            "as unmodified."
+        )
         return "mztab_sequence"
