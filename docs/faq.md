@@ -71,7 +71,7 @@ before using casanovoutils.
 
 **What does `pipeline` do compared to running stages individually?**
 
-`casanovoutils mgf pipeline` chains shuffle → downsample → purge-redundant
+`casanovoutils mgfutils pipeline` chains shuffle → spectra-per-peptide → purge-redundant
 in a single pass, writing one output file. Each stage is skipped when its
 parameter is omitted. Running the stages individually via separate commands
 produces identical results but requires intermediate files.
