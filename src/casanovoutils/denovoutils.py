@@ -167,7 +167,7 @@ def get_mgf_psms_df(
 def tokenize_helper(
     seq: str,
     tokenizer: depthcharge.tokenizers.PeptideTokenizer,
-    combine_n_term: bool = False,
+    combine_n_term: bool = True,
 ) -> list[str]:
     """
     Split a peptide sequence into tokens.
@@ -206,7 +206,7 @@ def tokenize_sequences(
     data_df: pl.DataFrame,
     seq_column: str,
     out_prefix: Optional[str] = None,
-    combine_n_term: bool = False,
+    combine_n_term: bool = True,
     residues_path: Optional[PathLike] = None,
     replace_isoleucine_with_leucine: bool = True,
 ) -> pl.DataFrame:
