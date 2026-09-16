@@ -45,6 +45,34 @@ def _get_peptides(spectra):
     return [s["params"]["seq"] for s in spectra]
 
 
+def _write_mgf_with_charges(path, spectra):
+    """Write spectra including charge fields.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Output file path.
+    spectra : list[tuple[str, int, list[float], list[float]]]
+        Each element is (peptide_sequence, charge, mz_values, intensity_values).
+
+    Returns
+    -------
+    str
+        The string path to the written file.
+    """
+    records = []
+    for seq, charge, mz, intensity in spectra:
+        records.append(
+            {
+                "params": {"seq": seq, "pepmass": (100.0,), "charge": [charge]},
+                "m/z array": np.array(mz),
+                "intensity array": np.array(intensity),
+            }
+        )
+    pyteomics.mgf.write(records, output=str(path))
+    return str(path)
+
+
 class TestCreateDatasetsBasic:
     """Basic functionality tests for create_datasets."""
 
@@ -146,11 +174,11 @@ class TestCreateDatasetsMultipleFiles:
         assert any(p.startswith("PEPB") for p in all_peps)
 
 
-class TestCreateDatasetsSpectraPerPeptide:
-    """Tests for the spectra_per_peptide option."""
+class TestCreateDatasetsSpectraPerPrecursor:
+    """Tests for the spectra_per_precursor option."""
 
-    def test_limits_spectra_per_peptide(self, tmp_path):
-        """Each peptide should have at most k spectra in the output."""
+    def test_limits_spectra_per_precursor(self, tmp_path):
+        """Each (peptide, charge state) precursor should have at most k spectra in the output."""
         spectra = []
         for i in range(10):
             for _ in range(5):
@@ -161,7 +189,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         create_datasets(
             mgf,
             output_root=output_root,
-            spectra_per_peptide=2,
+            spectra_per_precursor=2,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -178,7 +206,7 @@ class TestCreateDatasetsSpectraPerPeptide:
             assert count <= 2, f"{pep} has {count} spectra, expected <= 2"
 
     def test_no_limit_keeps_all_spectra(self, tmp_path):
-        """Without spectra_per_peptide, all spectra are retained."""
+        """Without spectra_per_precursor, all spectra are retained."""
         spectra = []
         for i in range(10):
             for _ in range(5):
@@ -194,7 +222,7 @@ class TestCreateDatasetsSpectraPerPeptide:
 
         assert len(train) + len(val) + len(test) == 50
 
-    def test_spectra_per_peptide_with_fewer_available(self, tmp_path):
+    def test_spectra_per_precursor_with_fewer_available(self, tmp_path):
         """Peptides with fewer than k spectra keep all of them."""
         spectra = [
             ("PEPA", [100.0], [1.0]),
@@ -211,7 +239,7 @@ class TestCreateDatasetsSpectraPerPeptide:
         create_datasets(
             mgf,
             output_root=output_root,
-            spectra_per_peptide=5,
+            spectra_per_precursor=5,
         )
 
         train = _read_mgf(tmp_path / "out.train.mgf")
@@ -226,6 +254,33 @@ class TestCreateDatasetsSpectraPerPeptide:
 
         assert pep_counts.get("PEPA", 0) == 1
         assert pep_counts.get("PEPB", 0) == 3
+
+    def test_spectra_per_precursor_per_charge_state(self, tmp_path):
+        """spectra_per_precursor=1 keeps one spectrum per (peptide, charge) pair."""
+        # PEPA appears 3 times with charge 2 and 3 times with charge 3.
+        # With spectra_per_precursor=1, we expect 1 spectrum at charge 2 AND
+        # 1 spectrum at charge 3 — 2 spectra total for PEPA, not 1.
+        spectra = []
+        for _ in range(3):
+            spectra.append(("PEPA", 2, [100.0], [1.0]))
+        for _ in range(3):
+            spectra.append(("PEPA", 3, [100.0], [1.0]))
+        # Add enough other peptides to form valid splits.
+        for i in range(18):
+            spectra.append((f"OTHER{i}", 2, [100.0], [1.0]))
+        mgf = _write_mgf_with_charges(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=1)
+
+        all_spectra = []
+        for split in ("train", "val", "test"):
+            all_spectra.extend(_read_mgf(tmp_path / f"out.{split}.mgf"))
+
+        pepa_spectra = [s for s in all_spectra if s["params"]["seq"] == "PEPA"]
+        # One spectrum per charge state → 2 total.
+        assert len(pepa_spectra) == 2
+        charges = {tuple(s["params"].get("charge", [])) for s in pepa_spectra}
+        assert charges == {(2,), (3,)}
 
 
 class TestCreateDatasetsReproducibility:
@@ -329,26 +384,55 @@ class TestCreateDatasetsEdgeCases:
                 existing_splits=(split, split),
             )
 
-    def test_spectra_per_peptide_zero_raises_error(self, tmp_path):
-        """Passing spectra_per_peptide=0 should raise a ValueError."""
+    def test_existing_splits_mskb_notation_raises_error(self, tmp_path):
+        """existing_splits containing MassIVE-KB PTM notation should raise ValueError."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [("PEP0", [100.0], [1.0])],
         )
-        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+        # Write a split MGF with a MassIVE-KB-style sequence (mass shift notation).
+        mskb_split = tmp_path / "mskb_split.mgf"
+        pyteomics.mgf.write(
+            [
+                {
+                    "params": {"seq": "C+57.021PEPTIDE", "pepmass": (900.0,)},
+                    "m/z array": np.array([100.0]),
+                    "intensity array": np.array([1.0]),
+                }
+            ],
+            output=str(mskb_split),
+        )
+        with pytest.raises(ValueError, match="MassIVE-KB"):
             create_datasets(
-                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=0
+                mgf,
+                output_root=str(tmp_path / "out"),
+                existing_splits=(mskb_split, mskb_split, mskb_split),
             )
 
-    def test_spectra_per_peptide_negative_raises_error(self, tmp_path):
-        """Passing a negative spectra_per_peptide should raise a ValueError."""
+    def test_spectra_per_precursor_zero_raises_error(self, tmp_path):
+        """Passing spectra_per_precursor=0 should raise a ValueError."""
         mgf = _write_mgf(
             tmp_path / "input.mgf",
             [("PEP0", [100.0], [1.0])],
         )
-        with pytest.raises(ValueError, match="spectra_per_peptide must be a positive"):
+        with pytest.raises(
+            ValueError, match="spectra_per_precursor must be a positive"
+        ):
             create_datasets(
-                mgf, output_root=str(tmp_path / "out"), spectra_per_peptide=-1
+                mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=0
+            )
+
+    def test_spectra_per_precursor_negative_raises_error(self, tmp_path):
+        """Passing a negative spectra_per_precursor should raise a ValueError."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEP0", [100.0], [1.0])],
+        )
+        with pytest.raises(
+            ValueError, match="spectra_per_precursor must be a positive"
+        ):
+            create_datasets(
+                mgf, output_root=str(tmp_path / "out"), spectra_per_precursor=-1
             )
 
     def test_small_dataset_all_go_to_train(self, tmp_path):
@@ -789,7 +873,7 @@ class TestCreateDatasetsIsobaricNormalization:
 
     def test_original_sequences_preserved_in_output(self, tmp_path):
         """Output MGF files retain original sequences despite isobaric normalization."""
-        spectra = [("PEPTIDE", [100.0], [1.0]), ("PEPTLDE", [100.0], [1.0])]
+        spectra = [("PEPTIDE", [100.0], [1.0]), ("REPTLDE", [100.0], [1.0])]
         for i in range(28):
             spectra.append((f"OTHER{i}", [100.0], [1.0]))
         mgf = _write_mgf(tmp_path / "input.mgf", spectra)
@@ -802,9 +886,12 @@ class TestCreateDatasetsIsobaricNormalization:
         test = _read_mgf(tmp_path / "out.test.mgf")
 
         all_seqs = set(_get_peptides(train + val + test))
-        # Original sequences (not their canonical forms) must be preserved.
+        # Original sequences must appear in the output.
         assert "PEPTIDE" in all_seqs
-        assert "PEPTLDE" in all_seqs
+        assert "REPTLDE" in all_seqs
+        # Isobaric I/L variants of each input sequence must NOT appear in the output.
+        assert "PEPTLDE" not in all_seqs
+        assert "REPTIDE" not in all_seqs
 
     def test_il_normalization_with_existing_splits(self, tmp_path):
         """I/L variant in new data routes to the correct existing split."""
@@ -1039,3 +1126,387 @@ class TestCreateDatasetsIsobaricNormalization:
         ), "N[Deamidated]-form should follow D-form into train"
         assert "PEPTN[Deamidated]DE" not in val_seqs
         assert "PEPTN[Deamidated]DE" not in test_seqs
+
+
+class TestCreateDatasetsEnhancements:
+    """Tests for peptides.txt output, log.txt output, and --mskb_format."""
+
+    # ------------------------------------------------------------------
+    # _strip_mods unit tests
+    # ------------------------------------------------------------------
+
+    def test_strip_mods_no_mods(self):
+        """Bare sequences are returned unchanged."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("PEPTIDE") == "PEPTIDE"
+
+    def test_strip_mods_per_residue(self):
+        """Per-residue modification brackets are removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("AC[Carbamidomethyl]GK") == "ACGK"
+        assert _strip_mods("AM[Oxidation]G") == "AMG"
+        assert _strip_mods("AN[Deamidated]G") == "ANG"
+
+    def test_strip_mods_nterm(self):
+        """N-terminal modification token including trailing dash is removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("[Acetyl]-PEPTIDE") == "PEPTIDE"
+        assert _strip_mods("[+229.163]-PEPTIDEK") == "PEPTIDEK"
+
+    def test_strip_mods_combined(self):
+        """Mixed N-terminal and per-residue mods are all removed."""
+        from casanovoutils.datasets import _strip_mods
+
+        assert _strip_mods("[+271.174]-AC[Carbamidomethyl]GK[+229.163]") == "ACGK"
+
+    # ------------------------------------------------------------------
+    # peptides.txt output
+    # ------------------------------------------------------------------
+
+    def test_peptides_txt_files_created(self, tmp_path):
+        """A peptides.txt file is created for each split."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i}", [100.0], [1.0]) for i in range(20)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        for split in ("train", "val", "test"):
+            assert (tmp_path / f"out.{split}.peptides.txt").exists()
+
+    def test_peptides_txt_two_columns(self, tmp_path):
+        """peptides.txt has two tab-separated columns: modified and bare."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [
+                ("AC[Carbamidomethyl]GK", [100.0], [1.0]),
+                ("[Acetyl]-PEPTIDE", [100.0], [1.0]),
+            ]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(18)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                assert len(cols) == 2, f"Expected 2 columns, got {len(cols)}: {line!r}"
+                all_rows.append((cols[0], cols[1]))
+
+        modified_seqs = {r[0] for r in all_rows}
+        bare_seqs = {r[1] for r in all_rows}
+
+        # Modified column preserves the full ProForma sequence.
+        assert "AC[Carbamidomethyl]GK" in modified_seqs
+        assert "[Acetyl]-PEPTIDE" in modified_seqs
+        # Bare column applies canonical substitutions then strips mods.
+        # PEPTIDE contains I → L, so bare form is PEPTLDE.
+        assert "ACGK" in bare_seqs
+        assert "PEPTLDE" in bare_seqs
+        # No brackets in the bare column.
+        for bare in bare_seqs:
+            assert "[" not in bare, f"Bracket found in bare column: {bare!r}"
+
+    def test_peptides_txt_canonical_bare(self, tmp_path):
+        """Bare column applies isobaric substitutions (I→L, N[Deamidated]→D, Q[Deamidated]→E)."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [
+                ("AN[Deamidated]G", [100.0], [1.0]),
+                ("AQ[Deamidated]G", [100.0], [1.0]),
+                ("AIKG", [100.0], [1.0]),
+            ]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(17)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                all_rows.append((cols[0], cols[1]))
+
+        bare_by_modified = dict(all_rows)
+        # N[Deamidated] → D in bare column.
+        assert bare_by_modified.get("AN[Deamidated]G") == "ADG"
+        # Q[Deamidated] → E in bare column.
+        assert bare_by_modified.get("AQ[Deamidated]G") == "AEG"
+        # I → L in bare column.
+        assert bare_by_modified.get("AIKG") == "ALKG"
+
+    def test_peptides_txt_sorted(self, tmp_path):
+        """peptides.txt rows are sorted by bare sequence then modified sequence."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i:02d}", [100.0], [1.0]) for i in range(20)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            rows = [line.split("\t") for line in lines]
+            keys = [(r[1], r[0]) for r in rows]
+            assert keys == sorted(keys), f"{split} peptides.txt is not sorted"
+
+    def test_peptides_txt_unique(self, tmp_path):
+        """peptides.txt has one row per unique modified sequence."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("PEPTIDE", [100.0], [1.0])] * 5
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"))
+
+        all_modified: list[str] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            all_modified += [line.split("\t")[0] for line in lines]
+
+        assert all_modified.count("PEPTIDE") == 1
+
+    # ------------------------------------------------------------------
+    # --mskb-format
+    # ------------------------------------------------------------------
+
+    def test_mskb_format_converts_sequences(self, tmp_path):
+        """mskb_format=True converts MassIVE-KB sequences to ProForma in output."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("C+57.021PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_seqs: set[str] = set()
+        for split in ("train", "val", "test"):
+            all_seqs.update(_get_peptides(_read_mgf(tmp_path / f"out.{split}.mgf")))
+
+        assert "C[Carbamidomethyl]PEPTIDE" in all_seqs
+        assert "C+57.021PEPTIDE" not in all_seqs
+
+    def test_mskb_format_nterm_converted(self, tmp_path):
+        """mskb_format=True sums and converts combined N-terminal shifts."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("+42.011PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_seqs: set[str] = set()
+        for split in ("train", "val", "test"):
+            all_seqs.update(_get_peptides(_read_mgf(tmp_path / f"out.{split}.mgf")))
+
+        assert "[Acetyl]-PEPTIDE" in all_seqs
+        assert "+42.011PEPTIDE" not in all_seqs
+
+    def test_mskb_format_peptides_txt_columns(self, tmp_path):
+        """With mskb_format=True, peptides.txt has ProForma in col 1 and bare in col 2."""
+        mgf = _write_mgf(
+            tmp_path / "input.mgf",
+            [("C+57.021PEPTIDE", [100.0], [1.0])]
+            + [(f"OTHER{i}", [100.0], [1.0]) for i in range(19)],
+        )
+        create_datasets(mgf, output_root=str(tmp_path / "out"), mskb_format=True)
+
+        all_rows: list[tuple[str, str]] = []
+        for split in ("train", "val", "test"):
+            lines = (tmp_path / f"out.{split}.peptides.txt").read_text().splitlines()
+            for line in lines:
+                cols = line.split("\t")
+                assert len(cols) == 2
+                all_rows.append((cols[0], cols[1]))
+
+        modified_seqs = {r[0] for r in all_rows}
+        bare_seqs = {r[1] for r in all_rows}
+
+        assert "C[Carbamidomethyl]PEPTIDE" in modified_seqs
+        # CPEPTIDE contains I → L, so bare form is CPEPTLDE.
+        assert "CPEPTLDE" in bare_seqs
+        for bare in bare_seqs:
+            assert "[" not in bare
+
+
+# ---------------------------------------------------------------------------
+# Tests for casanovo_config filtering path in create_datasets
+# ---------------------------------------------------------------------------
+
+
+def _write_casanovo_config(path, *, residues=None, min_peaks=2, max_charge=5):
+    """Write a minimal Casanovo YAML config for testing."""
+    import yaml
+
+    if residues is None:
+        residues = {}  # uses depthcharge default vocabulary
+    cfg = {
+        "residues": residues,
+        "min_peaks": min_peaks,
+        "max_charge": max_charge,
+        "replace_isoleucine_with_leucine": False,
+    }
+    path.write_text(yaml.dump(cfg))
+    return path
+
+
+# 19 unique valid peptide sequences (standard amino acids only).
+_VALID_SEQS = [
+    "ACDEF",
+    "GHIKL",
+    "MNPQR",
+    "STVWY",
+    "AACDE",
+    "GHILK",
+    "MNPQY",
+    "STVWI",
+    "AAGDE",
+    "GHIKM",
+    "MNPRY",
+    "STVWK",
+    "AAKDE",
+    "GHIML",
+    "MNRQY",
+    "STVWM",
+    "AALEF",
+    "GHILN",
+    "MNPVY",
+]
+
+
+def _write_mgf_with_charge_field(path, spectra):
+    """Write spectra with explicit charge fields.
+
+    Parameters
+    ----------
+    spectra : list[tuple[str, int, list[float], list[float]]]
+        Each element is (seq, charge, mz_values, intensity_values).
+    """
+    import numpy as np
+
+    records = []
+    for seq, charge, mz, intensity in spectra:
+        record = {
+            "params": {"seq": seq, "pepmass": (500.0,), "charge": [charge]},
+            "m/z array": np.array(mz),
+            "intensity array": np.array(intensity),
+        }
+        records.append(record)
+    pyteomics.mgf.write(records, output=str(path))
+    return str(path)
+
+
+def _spectra_with_charge(seqs, charge=2, n_peaks=3):
+    """Return (seq, charge, mz_list, intensity_list) tuples for ``seqs``."""
+    mz = list(range(100, 100 + n_peaks * 10, 10))
+    inten = [1.0] * n_peaks
+    return [(s, charge, mz, inten) for s in seqs]
+
+
+class TestCasanovoConfigFilter:
+    """Tests for create_datasets with casanovo_config filtering."""
+
+    def _all_seqs(self, tmp_path, root="out"):
+        seqs = set()
+        for split in ("train", "val", "test"):
+            seqs.update(_get_peptides(_read_mgf(tmp_path / f"{root}.{split}.mgf")))
+        return seqs
+
+    def test_invalid_tokens_filtered(self, tmp_path):
+        """Spectra with tokens outside the config vocabulary are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        # "BBBB" contains B, which is not a standard amino acid.
+        spectra = [("BBBB", 2, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS)
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "BBBB" not in self._all_seqs(tmp_path)
+
+    def test_valid_spectra_pass_through(self, tmp_path):
+        """Spectra that meet all criteria appear in the output."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        mgf = _write_mgf_with_charge_field(
+            tmp_path / "input.mgf",
+            _spectra_with_charge(_VALID_SEQS + ["ACDEFG"]),
+        )
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        seqs = self._all_seqs(tmp_path)
+        assert all(s in seqs for s in _VALID_SEQS)
+
+    def test_too_few_peaks_filtered(self, tmp_path):
+        """Spectra with fewer than min_peaks peaks are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml", min_peaks=3)
+        # "ACDEF" has only 1 peak — fewer than min_peaks=3.
+        spectra = [("ACDEF", 2, [100.0], [1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS[1:])
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "ACDEF" not in self._all_seqs(tmp_path)
+
+    def test_bad_charge_filtered(self, tmp_path):
+        """Spectra with charge above max_charge are excluded."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml", max_charge=3)
+        # charge=6 exceeds max_charge=3.
+        spectra = [("ACDEF", 6, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS[1:])
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        assert "ACDEF" not in self._all_seqs(tmp_path)
+
+    def test_missing_seq_filtered(self, tmp_path):
+        """Spectra with a missing SEQ field are excluded."""
+        import numpy as np
+
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        records = [
+            {
+                "params": {"pepmass": (500.0,), "charge": [2]},  # no "seq" key
+                "m/z array": np.array([100.0, 200.0, 300.0]),
+                "intensity array": np.array([1.0, 1.0, 1.0]),
+            }
+        ]
+        records += [
+            {
+                "params": {"seq": s, "pepmass": (500.0,), "charge": [2]},
+                "m/z array": np.array([100.0, 200.0, 300.0]),
+                "intensity array": np.array([1.0, 1.0, 1.0]),
+            }
+            for s in _VALID_SEQS
+        ]
+        pyteomics.mgf.write(records, output=str(tmp_path / "input.mgf"))
+
+        create_datasets(
+            str(tmp_path / "input.mgf"),
+            output_root=str(tmp_path / "out"),
+            casanovo_config=cfg,
+        )
+
+        seqs = self._all_seqs(tmp_path)
+        assert all(s in seqs for s in _VALID_SEQS)
+
+    def test_only_valid_spectra_contribute_to_splits(self, tmp_path):
+        """Split counts reflect the filtered set, not the raw input."""
+        cfg = _write_casanovo_config(tmp_path / "config.yaml")
+        # 1 invalid-token spectrum ("BBBB") + len(_VALID_SEQS) valid spectra.
+        spectra = [("BBBB", 2, [100.0, 200.0, 300.0], [1.0, 1.0, 1.0])]
+        spectra += _spectra_with_charge(_VALID_SEQS)
+        mgf = _write_mgf_with_charge_field(tmp_path / "input.mgf", spectra)
+
+        create_datasets(mgf, output_root=str(tmp_path / "out"), casanovo_config=cfg)
+
+        total = sum(
+            len(_read_mgf(tmp_path / f"out.{split}.mgf"))
+            for split in ("train", "val", "test")
+        )
+        assert total == len(_VALID_SEQS)

@@ -335,7 +335,7 @@ def get_mztab_df(
         return mztab_path
 
     logging.info("Reading mzTab file %s", str(mztab_path))
-    result = pyteomics.mztab.MzTab(mztab_path).spectrum_match_table
+    result = pyteomics.mztab.MzTab(str(mztab_path)).spectrum_match_table
     result = pl.from_pandas(result)
     logging.info("Read %d spectrum matches from %s", len(result), str(mztab_path))
     result = result.rename({c: f"mztab_{c}" for c in result.columns})
@@ -396,7 +396,10 @@ def get_ground_truth_df(
         index_exprs.append(
             pl.when(pl.col("mztab_spectra_ref").str.starts_with(prefix))
             .then(
-                pl.col("mztab_spectra_ref").str.slice(len(prefix)).cast(pl.Int64)
+                pl.col("mztab_spectra_ref")
+                .str.slice(len(prefix))
+                .str.strip_chars()
+                .cast(pl.Int64)
                 + offset
             )
             .otherwise(pl.col("tmp_mgf_idx"))

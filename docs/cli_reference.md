@@ -14,7 +14,6 @@ casanovoutils
 ├── mgfutils        — MGF file processing
 │   ├── pipeline
 │   ├── shuffle
-│   ├── downsample
 │   ├── spectra-per-peptide
 │   ├── downsample-spectra
 │   └── purge-redundant
@@ -34,7 +33,8 @@ casanovoutils
 │   └── peptide-lengths
 ├── datasets        — Create train/val/test splits from MGF files
 ├── graphloss       — Plot Casanovo training/validation loss curves
-└── residues        — Residue mass table utilities
+├── residues        — Residue mass table utilities
+└── visualize_errors — Mirror plots of top-k incorrectly predicted spectra
 ```
 
 ---
@@ -46,7 +46,7 @@ Process MGF spectrum files.
 ### `pipeline`
 
 Run spectra through an optional chain of processing stages in order:
-shuffle → downsample → purge redundant peaks. Each stage is skipped when
+shuffle → spectra-per-peptide → purge redundant peaks. Each stage is skipped when
 its enabling parameter is omitted.
 
 | Argument | Type | Default | Description |
@@ -56,15 +56,15 @@ its enabling parameter is omitted.
 | `--do_shuffle` | bool | `True` | Shuffle spectra |
 | `--downsample_k` | int | `None` | Max spectra per peptide (skip if omitted) |
 | `--purge_epsilon` | float | `None` | Min m/z gap to keep a peak in Da (skip if omitted) |
-| `--random_seed` | int | `42` | Random seed for shuffle and downsample |
+| `--random_seed` | int | `42` | Random seed for shuffle and spectra-per-peptide |
 
 **Examples:**
 
 ```bash
-# Shuffle only
-casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle False
+# Shuffle only (default; no extra flags needed)
+casanovoutils mgfutils pipeline input.mgf --outfile out.mgf
 
-# Downsample to 2 spectra per peptide, no shuffle
+# Cap at 2 spectra per peptide, no shuffle
 casanovoutils mgfutils pipeline input.mgf --outfile out.mgf --nodo_shuffle --downsample_k 2
 
 # Full pipeline
@@ -92,25 +92,6 @@ casanovoutils mgfutils shuffle input.mgf --outfile shuffled.mgf
 
 ---
 
-### `downsample`
-
-Limit the number of spectra retained per peptide sequence.
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `spectra` | path | required | Input MGF file path |
-| `--k` | int | `1` | Maximum spectra per peptide |
-| `--outfile` | path | `None` | Output MGF file path |
-| `--random_seed` | int | `42` | Random seed for reproducibility |
-
-**Example:**
-
-```bash
-casanovoutils mgfutils downsample input.mgf --outfile sampled.mgf --k 5
-```
-
----
-
 ### `spectra-per-peptide`
 
 Reservoir-sample up to `k` spectra per peptide in a single streaming pass.
@@ -120,6 +101,8 @@ Reservoir-sample up to `k` spectra per peptide in a single streaming pass.
 | `spectra` | path | required | Input MGF file path |
 | `--k` | int | `1` | Maximum spectra per peptide |
 | `--outfile` | path | `None` | Output MGF file path |
+| `--precursor` | bool | `False` | Group by peptide sequence *and* charge state (same peptide in different charge states treated as separate groups) |
+| `--ignore_mods` | bool | `False` | Strip ProForma bracketed modification annotations before grouping (modified and unmodified forms counted together) |
 | `--random_seed` | int | `42` | Random seed for reproducibility |
 
 **Example:**
@@ -283,6 +266,10 @@ Compute and plot precision-coverage curves from PSM predictions.
 Build a precision-coverage DataFrame from predicted and ground-truth PSMs.
 Accepts a pre-built ground-truth DataFrame or the raw MGF and mzTab paths.
 
+Every residue token in the predicted and ground truth sequences must be in
+the residue map, or the command stops with an error naming the tokens; pass
+`--residues_path` with a file that includes them.
+
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--ground_truth_df` | path | `None` | Pre-built ground-truth DataFrame |
@@ -329,7 +316,8 @@ Generate per-file statistics and visualisations for MGF files.
 ### `summarize`
 
 Produce a self-contained HTML report for an MGF file covering charge
-distribution, peak counts, peptide lengths, and fragment ion coverage.
+distribution, peak counts, peptide lengths, C-terminal amino acid distribution,
+and fragment ion coverage.
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -346,6 +334,28 @@ distribution, peak counts, peptide lengths, and fragment ion coverage.
 ```bash
 casanovoutils summarize_mgf summarize input.mgf --output_root my_report \
   --tolerance 10 --tolerance_unit ppm --workers 4
+```
+
+---
+
+### `count-cterm-aas`
+
+Count C-terminal amino acid residues across annotated spectra (requires `SEQ=`).
+Counts at PSM level (one tally per spectrum, not per unique peptide).  The full
+residue token is reported, so a modified residue such as `K[+229.163]` is
+counted separately from bare `K`.  Spectra without `SEQ=` are skipped.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Input MGF file (requires `SEQ=` in ProForma notation) |
+| `--output_tsv` | path | `"cterm_aas.tsv"` | Output counts TSV (`amino_acid`, `count`, `percentage`) |
+| `--output_plot` | path | `"cterm_aas.png"` | Output horizontal bar chart |
+
+**Example:**
+
+```bash
+casanovoutils summarize_mgf count-cterm-aas input.mgf \
+  --output_tsv cterm.tsv --output_plot cterm.png
 ```
 
 ---
@@ -435,18 +445,24 @@ casanovoutils summarize_mgf peptide-lengths input.mgf
 
 Create peptide-level train/validation/test splits from annotated MGF files.
 Peptides are split 80 / 10 / 10 by unique sequence to prevent leakage between
-splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
-`.test.mgf`.
+splits.
+
+The following output files are written:
+
+- `<output_root>.{train,val,test}.mgf` — spectra assigned to each split
+- `<output_root>.{train,val,test}.peptides.txt` — tab-separated modified and bare sequences
+- `<output_root>.log.txt` — single run-level log with spectrum and peptide counts
 
 | Argument | Type | Default | Description |
 | --- | --- | --- | --- |
 | `*mgf_files` | path(s) | required | One or more annotated MGF files |
 | `--output_root` | str | required | Base path for output files |
-| `--spectra_per_peptide` | int | `None` | Cap spectra per peptide from new input files |
+| `--spectra_per_precursor` | int | `None` | Cap spectra per (peptide, charge state) precursor from new input files |
 | `--random_seed` | int | `42` | Random seed for reproducibility |
 | `--overwrite` | bool | `False` | Overwrite existing output files |
 | `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
 | `--combine_with_existing` | bool | `False` | Include existing spectra in output alongside new ones |
+| `--mskb_format` | bool | `False` | Convert input sequences from MassIVE-KB PTM notation to ProForma before splitting |
 
 **Examples:**
 
@@ -454,9 +470,12 @@ splits. Outputs three MGF files: `<output_root>.train.mgf`, `.val.mgf`, and
 # Basic split
 casanovoutils datasets input.mgf --output_root splits/run1
 
-# Multiple input files, cap at 3 spectra per peptide
+# Multiple input files, cap at 3 spectra per precursor
 casanovoutils datasets a.mgf b.mgf --output_root splits/combined \
-  --spectra_per_peptide 3
+  --spectra_per_precursor 3
+
+# Convert MassIVE-KB PTM notation to ProForma before splitting
+casanovoutils datasets input.mgf --output_root splits/run1 --mskb_format
 ```
 
 ---
@@ -494,4 +513,59 @@ back to other tools via `--residues_path`.
 
 ```bash
 casanovoutils residues my_residues.yaml
+```
+
+---
+
+## `casanovoutils visualize_errors`
+
+Plot the top-k incorrectly predicted spectra from a Casanovo de novo
+sequencing run.
+
+Loads an annotated MGF file (with `SEQ=` fields in ProForma notation) and a
+Casanovo mzTab output file, joins them on the spectrum index, and identifies
+incorrect predictions using mass-based matching.  The top-k incorrect spectra
+by Casanovo score are plotted as **mirror plots**: the predicted ProForma
+sequence annotates the top panel and the ground truth ProForma sequence
+annotates the mirrored bottom panel.  A text header on each figure shows rank,
+score, charge, precursor m/z, Δm/z in Da and ppm, and scan number.
+
+By default, isoleucine (I) and leucine (L) are treated as equivalent when
+deciding whether a prediction is correct — they share the same monoisotopic
+mass and cannot be distinguished by standard CID/HCD fragmentation.  Use
+`--distinct_il` to treat them as distinct amino acids.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mgf_file` | path | required | Annotated MGF file (`SEQ=` fields must be in ProForma notation) |
+| `mztab_file` | path | required | Casanovo mzTab output file |
+| `--output_dir` | path | `"visualize_errors"` | Directory for output PNG files and the log file |
+| `--k` | int | `10` | Maximum number of spectra to plot |
+| `--fragment_tol` | float | `0.05` | Fragment ion mass tolerance for b/y ion annotation |
+| `--fragment_tol_mode` | str | `"Da"` | Tolerance unit: `"Da"` or `"ppm"` |
+| `--ion_types` | str | `"by"` | Ion series to annotate, e.g. `"by"` or `"abcxyz"` |
+| `--neutral_losses` | bool | `False` | Annotate NH₃ and H₂O neutral loss ions |
+| `--distinct_il` | bool | `False` | Treat I and L as distinct amino acids when assessing correctness (by default they are considered equivalent) |
+| `--overwrite` | bool | `False` | Overwrite output PNGs from a previous run |
+| `--residues_path` | path | `None` | Custom residue mass YAML file; if omitted the bundled `residues.yaml` is used |
+
+Each output PNG is named `rank_NNNN_scan_S.png`, where `NNNN` is the rank
+(1 = highest-scoring incorrect prediction) and `S` is the scan number.  A
+`visualize_errors.log` file is also written to `output_dir`.
+
+**Examples:**
+
+```bash
+# Plot top 10 incorrect spectra with default settings
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/
+
+# Plot top 5, treating I and L as distinct, with ppm tolerance
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/ --k 5 --distinct_il \
+  --fragment_tol 20 --fragment_tol_mode ppm
+
+# Include neutral loss annotations
+casanovoutils visualize_errors predictions.mgf casanovo.mztab \
+  --output_dir error_plots/ --neutral_losses
 ```
