@@ -250,7 +250,7 @@ def test_calc_precision_coverage_all_correct():
             Constants.ground_truth_tokens: ["A", "K", "G"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
-            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
+            Constants.mgf_title: ["foo", "foo", "foo"],
         }
     )
     result = calc_precision_coverage(df, Constants.pep_score_column)
@@ -269,7 +269,7 @@ def test_calc_precision_coverage_all_wrong():
             Constants.ground_truth_tokens: ["Q", "Y", "V"],
             Constants.pep_score_column: [0.9, 0.8, 0.7],
             Constants.aa_scores_column: ["", "", ""],
-            Constants.mgf_title: ["foo", "foo", "foo", "foo"],
+            Constants.mgf_title: ["foo", "foo", "foo"],
         }
     )
     result = calc_precision_coverage(df, Constants.pep_score_column)
