@@ -4,8 +4,6 @@
 
 ### Added
 
-- `casanovoutils visualize_errors`: creates mirror plots of the top scoring
-  incorrect predictions at the peptide level
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
   in a single command with each stage independently optional.
 - `casanovoutils mgf purge-redundant`: remove near-duplicate peaks within each
@@ -20,18 +18,6 @@
 
 ### Changed
 
-- `casanovoutils preccov get_pc_df` now decides whether a prediction is correct
-  by mass-based alignment (`--cum_mass_threshold`, default 0.5 Da, and
-  `--ind_mass_threshold`, default 0.1 Da) instead of exact token equality, so
-  mass-equivalent residues such as I/L and N[Deamidated]/D count as matches.
-  The matching helpers are ported from Casanovo, which is no longer a
-  dependency.
-- Boolean CLI flags accept `true` and `false` in any case; other strings are
-  rejected instead of being treated as true.
-- Renamed `mgf` to `mgfutils`. Existing commands such as
-  `casanovoutils mgf shuffle` should now be invoked as
-  `casanovoutils mgfutils shuffle`.
-- Removed `downsample` subcommand under `mgfutils`
 - All CLI entry points consolidated into a single `casanovoutils` command with
   nested subcommands (`mgf`, `denovo`, `dump-residues`). The previous separate
   entry points (`graph-prec-cov`, `downsample-ms`, `mgf-utils`,
