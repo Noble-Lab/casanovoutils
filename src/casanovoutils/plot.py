@@ -56,9 +56,9 @@ def _read_spectrum(peak_file: str, index: int) -> sus.MsmsSpectrum:
 
     if charge is None:
         warnings.warn(
-            f"No precursor charge for spectrum index {index}; defaulting to 0."
+            f"No precursor charge for spectrum index {index}; defaulting to 1."
         )
-        precursor_charge = 0
+        precursor_charge = 1
     else:
         precursor_charge = int(charge)
     return sus.MsmsSpectrum(
@@ -112,10 +112,14 @@ def _annotated_spectrum(
     ion_types: str,
     max_charge: int | None,
     max_isotope: int,
+    remove_precursor_tol: float | None,
+    remove_precursor_tol_mode: str,
 ) -> sus.MsmsSpectrum:
     """Build the annotated spectrum for a PSM in an mzTab file."""
     peptide = _peptide_at_index(get_mztab_df(mztab), index)
     spectrum = _read_spectrum(peak_file, index)
+    if remove_precursor_tol is not None:
+        spectrum.remove_precursor_peak(remove_precursor_tol, remove_precursor_tol_mode)
     spectrum.annotate_proforma(
         peptide,
         fragment_tol,
@@ -138,6 +142,8 @@ def spectrum(
     max_charge: int | None = None,
     max_isotope: int = 0,
     title: str | None = None,
+    remove_precursor_tol: float | None = None,
+    remove_precursor_tol_mode: str = "Da",
 ) -> None:
     """
     Plot a single annotated spectrum from a Casanovo mzTab result.
@@ -166,6 +172,12 @@ def spectrum(
         Maximum isotope number to annotate for each fragment ion.
     title : str or None
         Optional title for the plot.
+    remove_precursor_tol : float or None
+        If set, remove the precursor peak within this tolerance (in
+        ``remove_precursor_tol_mode`` units) before annotating. ``None``
+        keeps the precursor peak.
+    remove_precursor_tol_mode : str
+        Tolerance mode for precursor peak removal, ``"Da"`` or ``"ppm"``.
     """
     spec = _annotated_spectrum(
         mztab,
@@ -176,6 +188,8 @@ def spectrum(
         ion_types,
         max_charge,
         max_isotope,
+        remove_precursor_tol,
+        remove_precursor_tol_mode,
     )
     fig, ax = plt.subplots(figsize=(12, 6))
     sup.spectrum(spec, ax=ax)
@@ -198,6 +212,8 @@ def mirror(
     max_charge: int | None = None,
     max_isotope: int = 0,
     title: str | None = None,
+    remove_precursor_tol: float | None = None,
+    remove_precursor_tol_mode: str = "Da",
 ) -> None:
     """
     Plot a mirror plot of a predicted versus a ground truth annotation.
@@ -232,6 +248,12 @@ def mirror(
     title : str or None
         Optional title for the plot. A note that the top spectrum is the
         prediction and the bottom is the ground truth is always appended.
+    remove_precursor_tol : float or None
+        If set, remove the precursor peak within this tolerance (in
+        ``remove_precursor_tol_mode`` units) from both spectra before
+        annotating. ``None`` keeps the precursor peak.
+    remove_precursor_tol_mode : str
+        Tolerance mode for precursor peak removal, ``"Da"`` or ``"ppm"``.
     """
     top = _annotated_spectrum(
         mztab,
@@ -242,6 +264,8 @@ def mirror(
         ion_types,
         max_charge,
         max_isotope,
+        remove_precursor_tol,
+        remove_precursor_tol_mode,
     )
     bottom = _annotated_spectrum(
         ground_truth_mztab,
@@ -252,6 +276,8 @@ def mirror(
         ion_types,
         max_charge,
         max_isotope,
+        remove_precursor_tol,
+        remove_precursor_tol_mode,
     )
     fig, ax = plt.subplots(figsize=(12, 6))
     sup.mirror(top, bottom, ax=ax)

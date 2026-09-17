@@ -59,7 +59,7 @@ def test_read_spectrum_no_charge_warns(tmp_path):
     _write_mgf(mgf, charge="")
     with pytest.warns(UserWarning, match="No precursor charge"):
         spec = plot._read_spectrum(str(mgf), 0)
-    assert spec.precursor_charge == 0
+    assert spec.precursor_charge == 1
 
 
 def test_peptide_at_index_multiple_warns():
@@ -103,3 +103,29 @@ def test_mirror_title(tmp_path):
         title="My mirror",
     )
     assert out.is_file()
+
+
+def test_remove_precursor_peak(tmp_path):
+    mgf = tmp_path / "prec.mgf"
+    # Charge 1 precursor at m/z 500.0, with a peak sitting on it.
+    mgf.write_text(
+        "BEGIN IONS\n"
+        "TITLE=s0\n"
+        "PEPMASS=500.0\n"
+        "CHARGE=1+\n"
+        "100.0 1.0\n"
+        "200.0 2.0\n"
+        "500.0 9.0\n"
+        "END IONS\n"
+    )
+    df = _mztab("PEPTIDEK")
+
+    kept = plot._annotated_spectrum(
+        df, str(mgf), 0, 0.5, "Da", "by", None, 0, None, "Da"
+    )
+    assert any(abs(mz - 500.0) < 0.01 for mz in kept.mz)
+
+    removed = plot._annotated_spectrum(
+        df, str(mgf), 0, 0.5, "Da", "by", None, 0, 1.5, "Da"
+    )
+    assert not any(abs(mz - 500.0) < 0.01 for mz in removed.mz)
