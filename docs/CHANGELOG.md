@@ -4,6 +4,9 @@
 
 ### Added
 
+- `casanovoutils plot spectrum` / `casanovoutils plot mirror`: plot an
+  annotated spectrum, or a mirror plot of a predicted versus ground-truth
+  annotation, from a Casanovo mzTab result and its peak file.
 - `casanovoutils visualize_errors`: creates mirror plots of the top scoring
   incorrect predictions at the peptide level
 - `casanovoutils mgf pipeline`: chain shuffle, downsample, and purge-redundant
