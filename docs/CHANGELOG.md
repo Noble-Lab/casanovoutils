@@ -20,6 +20,8 @@
 
 ### Changed
 
+- `casanovoutils graphloss` now adds a learning-rate panel below the loss curve
+  when learning-rate values are present in the input.
 - `casanovoutils preccov get_pc_df` now decides whether a prediction is correct
   by mass-based alignment (`--cum_mass_threshold`, default 0.5 Da, and
   `--ind_mass_threshold`, default 0.1 Da) instead of exact token equality, so

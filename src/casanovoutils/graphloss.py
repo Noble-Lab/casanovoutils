@@ -265,7 +265,7 @@ def plot_losses(
         ax.plot(steps, losses, "-o", markersize=2, label=label)
 
     ax.set_ylabel("Loss")
-    ax.set_title(root)
+    ax.set_title(f"{root} loss curve")
 
     if max_y is not None:
         ax.set_ylim(0, max_y)
@@ -279,6 +279,7 @@ def plot_losses(
             if lr_list:
                 steps, lrs = zip(*lr_list)
                 lr_ax.plot(steps, lrs, "-o", markersize=2)
+        lr_ax.set_title("Learning rate")
         lr_ax.set_ylabel("Learning rate")
         lr_ax.set_xlabel("Step")
     else:
