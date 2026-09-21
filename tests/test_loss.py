@@ -2,9 +2,12 @@ import pytest
 
 from casanovoutils.graphloss import (
     detect_input_format,
+    plot,
     read_from_csvfile,
     read_from_file,
     read_from_logfile,
+    read_lr_from_csvfile,
+    read_lr_from_file,
 )
 
 SAMPLE_CASA_BALANCED_LOG = """2026-01-17 08:50:26,334 INFO [casanovo/MainProcess] utils.log_system_info : ======= System Information =======
@@ -279,3 +282,45 @@ def test_read_from_file_dispatches_by_format(tmp_path) -> None:
     assert len(val_csv) == 30
     assert len(train_log) == 29
     assert len(val_log) == 30
+
+
+SAMPLE_METRICS_CSV_WITH_LR = """epoch,lr-Adam,lr-Adam-momentum,step,train_CELoss,valid_CELoss
+0,0.0001,0.9,50,,
+0,0.0002,0.9,100,0.5,
+1,0.0003,0.9,150,,0.4
+"""
+
+
+def test_read_lr_from_csvfile(tmp_path) -> None:
+    """Learning-rate values are read from the lr-<optimizer> column."""
+    path = _write_sample(tmp_path, "metrics.csv", SAMPLE_METRICS_CSV_WITH_LR)
+    assert read_lr_from_csvfile(path) == [
+        (50, 0.0001),
+        (100, 0.0002),
+        (150, 0.0003),
+    ]
+
+
+def test_read_lr_missing_column(tmp_path) -> None:
+    """A metrics file without a learning-rate column yields no series."""
+    path = _write_sample(
+        tmp_path, "metrics.csv", "step,train_CELoss,valid_CELoss\n50,0.5,\n"
+    )
+    assert read_lr_from_csvfile(path) == []
+
+
+def test_read_lr_from_logfile_returns_empty(tmp_path) -> None:
+    """Log files carry no learning rate, so the series is empty."""
+    path = _write_sample(tmp_path, "casa_balanced.log", SAMPLE_CASA_BALANCED_LOG)
+    assert read_lr_from_file(path) == []
+
+
+def test_plot_show_lr_bad_value_exits(tmp_path) -> None:
+    """A non-numeric learning rate exits cleanly rather than crashing."""
+    path = _write_sample(
+        tmp_path,
+        "metrics.csv",
+        "lr-Adam,step,train_CELoss,valid_CELoss\nx,50,0.5,\n",
+    )
+    with pytest.raises(SystemExit):
+        plot(str(tmp_path / "out"), [str(path)], show_lr=True)
