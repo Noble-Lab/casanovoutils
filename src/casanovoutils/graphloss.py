@@ -293,7 +293,7 @@ def plot_losses(
 
 def plot(
     root: str,
-    inputs: list[str],
+    inputs: str,
     max_y: Optional[float] = None,
     show_lr: bool = False,
 ) -> None:
