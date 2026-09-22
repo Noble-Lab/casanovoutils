@@ -323,4 +323,4 @@ def test_plot_show_lr_bad_value_exits(tmp_path) -> None:
         "lr-Adam,step,train_CELoss,valid_CELoss\nx,50,0.5,\n",
     )
     with pytest.raises(SystemExit):
-        plot(str(tmp_path / "out"), [str(path)], show_lr=True)
+        plot(str(tmp_path / "out"), str(path), show_lr=True)
