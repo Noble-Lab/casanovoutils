@@ -463,6 +463,9 @@ The following output files are written:
 | `--existing_splits` | paths | `None` | Tuple of existing (train, val, test) MGF paths to extend |
 | `--combine_with_existing` | bool | `False` | Include existing spectra in output alongside new ones |
 | `--mskb_format` | bool | `False` | Convert input sequences from MassIVE-KB PTM notation to ProForma before splitting |
+| `--group_by_backbone` | bool | `False` | Keep modification variants of an I/L-collapsed backbone together, preserving transitive canonical mass-equivalence links |
+| `--train_fraction` | float | `1.0` | Retain a nested, seed-ranked fraction of training groups; validation/test remain unchanged |
+| `--train_peptides` | int | `None` | Retain at most this many training groups; requires `train_fraction=1` |
 
 **Examples:**
 
@@ -476,7 +479,27 @@ casanovoutils datasets a.mgf b.mgf --output_root splits/combined \
 
 # Convert MassIVE-KB PTM notation to ProForma before splitting
 casanovoutils datasets input.mgf --output_root splits/run1 --mskb_format
+
+# Nested training subsets with identical held-out spectra
+casanovoutils datasets input.mgf --output_root splits/run10 \
+  --group_by_backbone --train_fraction 0.1 --random_seed 454
+casanovoutils datasets input.mgf --output_root splits/run25 \
+  --group_by_backbone --train_fraction 0.25 --random_seed 454
+
+# Select by unique training peptide count instead of a fraction
+casanovoutils datasets input.mgf --output_root splits/run50000 \
+  --group_by_backbone --train_peptides 50000 --random_seed 454
 ```
+
+Backbone grouping preserves original labels and joins both backbone and canonical
+mass-equivalence links. For example, unmodified N, deamidated N and D can form a
+connected group. Existing splits that separate connected variants are rejected.
+Named, delta-mass and `UNIMOD:7` deamidation annotations use the same shared
+equivalence rules. The second column of `peptides.txt` identifies the group's
+representative backbone. Training fractions select a hash-ranked prefix of
+groups, rounded up; peptide budgets take at most the requested number from
+the same ranking. `spectra_per_precursor` remains a separate per-canonical-
+modified-peptide, per-charge sampling cap.
 
 ---
 

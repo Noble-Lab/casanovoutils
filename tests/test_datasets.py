@@ -7,6 +7,198 @@ import pytest
 from casanovoutils.datasets import create_datasets
 
 
+class TestBackboneSubsets:
+    """Backbone leakage and learning-curve subsets use the shared splitter."""
+
+    @pytest.mark.parametrize(
+        "modified,canonical",
+        [
+            ("AN[+0.984000]K", "ADK"),
+            ("AQ[+0.984016]K", "AEK"),
+            ("AN[UNIMOD:7]K", "ADK"),
+            ("AQ[UNIMOD:7]K", "AEK"),
+        ],
+    )
+    def test_numeric_and_unimod_deamidation_use_existing_equivalence(
+        self, tmp_path, modified, canonical
+    ):
+        source = _write_mgf(
+            tmp_path / "input.mgf",
+            [
+                (s, [100.0], [1.0])
+                for s in [modified, canonical] + [f"PEP{i}" for i in range(30)]
+            ],
+        )
+        root = str(tmp_path / "split")
+        create_datasets(source, output_root=root)
+        owners = {
+            s: split
+            for split in ("train", "val", "test")
+            for s in _get_peptides(_read_mgf(f"{root}.{split}.mgf"))
+        }
+        assert owners[modified] == owners[canonical]
+
+    def test_modifications_and_mass_aliases_share_one_split(self, tmp_path):
+        variants = ["ANK", "AN[Deamidated]K", "ADK", "[+229.163]-ADK[+229.163]"]
+        source = _write_mgf(
+            tmp_path / "input.mgf",
+            [(s, [100.0], [1.0]) for s in variants + [f"PEP{i}" for i in range(40)]],
+        )
+        root = str(tmp_path / "split")
+        create_datasets(source, output_root=root, group_by_backbone=True)
+        owners = {}
+        for split in ("train", "val", "test"):
+            for sequence in _get_peptides(_read_mgf(f"{root}.{split}.mgf")):
+                owners[sequence] = split
+        assert len({owners[s] for s in variants}) == 1
+        assert set(owners) == set(variants + [f"PEP{i}" for i in range(40)])
+
+    def test_grouping_is_order_independent(self):
+        from casanovoutils.datasets import _BackboneGroups
+
+        sequences = [
+            "ANK",
+            "AN[Deamidated]K",
+            "ADK",
+            "ADK[+229.163]",
+            "QK",
+            "Q[Deamidated]K",
+            "EK",
+        ]
+        a, b = _BackboneGroups(), _BackboneGroups()
+        for sequence in sequences:
+            a.add(sequence)
+        for sequence in reversed(sequences):
+            b.add(sequence)
+        assert a.keys() == b.keys()
+
+    def test_new_alias_cannot_bridge_existing_splits(self, tmp_path):
+        paths = tuple(
+            _write_mgf(tmp_path / f"{name}.mgf", [(seq, [100.0], [1.0])])
+            for name, seq in [("train", "ANK"), ("val", "PEPTIDE"), ("test", "ADK")]
+        )
+        source = _write_mgf(tmp_path / "new.mgf", [("AN[Deamidated]K", [100.0], [1.0])])
+        root = str(tmp_path / "out")
+        with pytest.raises(ValueError, match="multiple existing splits"):
+            create_datasets(
+                source, output_root=root, existing_splits=paths, group_by_backbone=True
+            )
+        assert not (tmp_path / "out.train.mgf").exists()
+
+    def test_fraction_subsets_are_nested_and_holdout_bytes_identical(self, tmp_path):
+        sequences = [f"PEP{i}" for i in range(100)]
+        source = _write_mgf(
+            tmp_path / "input.mgf", [(s, [100.0], [1.0]) for s in sequences]
+        )
+        outputs = []
+        for fraction in (0.1, 0.25, 0.5, 1.0):
+            root = str(tmp_path / str(fraction))
+            create_datasets(
+                source,
+                output_root=root,
+                group_by_backbone=True,
+                train_fraction=fraction,
+            )
+            outputs.append(root)
+        training = [set(_get_peptides(_read_mgf(f"{r}.train.mgf"))) for r in outputs]
+        assert [len(s) for s in training] == [8, 20, 40, 80]
+        assert all(a <= b for a, b in zip(training, training[1:]))
+        for split in ("val", "test"):
+            assert (
+                len(
+                    {
+                        (tmp_path / f"{f}.{split}.mgf").read_bytes()
+                        for f in (0.1, 0.25, 0.5, 1.0)
+                    }
+                )
+                == 1
+            )
+
+    def test_fraction_applies_to_combined_existing_training(self, tmp_path):
+        paths = tuple(
+            _write_mgf(
+                tmp_path / f"{name}.mgf",
+                [(f"{name}{i}", [100.0], [1.0]) for i in range(size)],
+            )
+            for name, size in [("train", 20), ("val", 3), ("test", 3)]
+        )
+        source = _write_mgf(tmp_path / "new.mgf", [("NEW", [100.0], [1.0])])
+        for fraction in (0.5, 1.0):
+            create_datasets(
+                source,
+                output_root=str(tmp_path / str(fraction)),
+                existing_splits=paths,
+                combine_with_existing=True,
+                train_fraction=fraction,
+            )
+        half = set(_get_peptides(_read_mgf(tmp_path / "0.5.train.mgf")))
+        full = set(_get_peptides(_read_mgf(tmp_path / "1.0.train.mgf")))
+        assert half < full
+        assert len(half) == int(np.ceil(len(full) * 0.5))
+        for split in ("val", "test"):
+            assert (tmp_path / f"0.5.{split}.mgf").read_bytes() == (
+                tmp_path / f"1.0.{split}.mgf"
+            ).read_bytes()
+
+    def test_peptide_budget_keeps_all_spectra_for_selected_groups(self, tmp_path):
+        source = _write_mgf(
+            tmp_path / "input.mgf",
+            [(f"PEP{i}", [100.0], [1.0]) for i in range(40) for _ in range(3)],
+        )
+        root = str(tmp_path / "out")
+        create_datasets(source, output_root=root, train_peptides=7)
+        from collections import Counter
+
+        counts = Counter(_get_peptides(_read_mgf(f"{root}.train.mgf")))
+        assert sum(counts.values()) == 21
+        assert len(counts) == 7
+        assert set(counts.values()) == {3}
+
+    def test_backbone_grouping_does_not_merge_precursor_sampling_caps(self, tmp_path):
+        seqs = ["PEPTIDE", "[+229.163]-PEPTIDE"]
+        source = _write_mgf(
+            tmp_path / "input.mgf",
+            [(s, [100.0], [1.0]) for s in seqs for _ in range(10)],
+        )
+        root = str(tmp_path / "out")
+        create_datasets(
+            source, output_root=root, group_by_backbone=True, spectra_per_precursor=3
+        )
+        retained = [
+            s
+            for split in ("train", "val", "test")
+            for s in _read_mgf(f"{root}.{split}.mgf")
+        ]
+        assert len(retained) == 6
+        assert set(_get_peptides(retained)) == set(seqs)
+
+    @pytest.mark.parametrize(
+        "fraction", [0, -0.1, 1.1, float("nan"), float("inf"), True]
+    )
+    def test_invalid_fractions_fail_before_creating_outputs(self, tmp_path, fraction):
+        with pytest.raises(ValueError, match="train_fraction"):
+            create_datasets(
+                "unused.mgf", output_root=str(tmp_path / "out"), train_fraction=fraction
+            )
+        assert not list(tmp_path.iterdir())
+
+    @pytest.mark.parametrize("budget", [0, -1, 1.5, True])
+    def test_invalid_peptide_budgets(self, tmp_path, budget):
+        with pytest.raises(ValueError, match="train_peptides"):
+            create_datasets(
+                "unused.mgf", output_root=str(tmp_path / "out"), train_peptides=budget
+            )
+
+    def test_incompatible_subset_options(self, tmp_path):
+        with pytest.raises(ValueError, match="train_peptides"):
+            create_datasets(
+                "unused.mgf",
+                output_root=str(tmp_path / "out"),
+                train_peptides=10,
+                train_fraction=0.5,
+            )
+
+
 def _write_mgf(path, spectra):
     """Write a list of (seq, mz, intensity) tuples as a valid MGF file.
 

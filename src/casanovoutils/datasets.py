@@ -1,6 +1,8 @@
 """Create train/validation/test dataset splits from annotated MGF files."""
 
+import hashlib
 import logging
+import math
 import pathlib
 import random
 import re
@@ -27,6 +29,7 @@ _MOD_RE = re.compile(r"-?\[[^\]]*\]-?")
 # Matches MassIVE-KB PTM notation: a sign+mass shift (integer or decimal) at
 # the start of a sequence (N-terminal) or immediately after a residue letter.
 _MSKB_SEQ_RE = re.compile(r"(?:^|[A-Z])[+-]\d+(?:\.\d+)?")
+_DEAMIDATION_RE = re.compile(r"([NQ])\[(UNIMOD:7|[+-]?\d+(?:\.\d+)?)\]")
 
 
 def _canonical(seq: str) -> str:
@@ -69,6 +72,17 @@ def _canonical(seq: str) -> str:
     seq = "".join(chars)
     seq = seq.replace("N[Deamidated]", "D")
     seq = seq.replace("Q[Deamidated]", "E")
+
+    # TMT training files may retain delta-mass ProForma labels rather than
+    # names. Accept normal rounding of the deamidation mass, not arbitrary
+    # modifications on N/Q. Keep this in the shared canonicalizer.
+    def deamidated(match):
+        mod = match[2]
+        if mod == "UNIMOD:7" or math.isclose(float(mod), 0.984016, abs_tol=0.0005):
+            return {"N": "D", "Q": "E"}[match[1]]
+        return match[0]
+
+    seq = _DEAMIDATION_RE.sub(deamidated, seq)
     return seq
 
 
@@ -89,6 +103,62 @@ def _strip_mods(seq: str) -> str:
         Bare amino-acid sequence, e.g. ``"ACGK"``.
     """
     return _MOD_RE.sub("", seq)
+
+
+class _BackboneGroups:
+    """Join backbone variants without losing canonical mass equivalences."""
+
+    def __init__(self):
+        self.parents: dict[str, str] = {}
+        self.owners: dict[str, str] = {}
+
+    def find(self, key: str) -> str:
+        root = key
+        while self.parents[root] != root:
+            root = self.parents[root]
+        while key != root:
+            next_key = self.parents[key]
+            self.parents[key] = root
+            key = next_key
+        return root
+
+    def add(self, seq: str) -> None:
+        # Strip modifications first: otherwise N[Deamidated] would lose
+        # its connection to unmodified N when _canonical maps it to D.
+        backbone = _canonical(_strip_mods(seq))
+        self.parents.setdefault(backbone, backbone)
+        canonical = _canonical(seq)
+        owner = self.owners.setdefault(canonical, backbone)
+        a, b = self.find(backbone), self.find(owner)
+        # A stable representative makes grouping independent of input order.
+        self.parents[max(a, b)] = min(a, b)
+
+    def keys(self) -> dict[str, str]:
+        return {canonical: self.find(owner) for canonical, owner in self.owners.items()}
+
+
+def _select_train_peptides(
+    assignments: dict[str, str],
+    existing_train: set[str],
+    random_seed: int,
+    train_fraction: float,
+    train_peptides: Optional[int],
+) -> set[str]:
+    """Select a stable prefix of training groups, preserving held-out data."""
+    candidates = {p for p, split in assignments.items() if split == "train"}
+    candidates |= existing_train
+    ordered = sorted(
+        candidates,
+        key=lambda p: (hashlib.sha256(f"{random_seed}:{p}".encode()).digest(), p),
+    )
+    count = (
+        train_peptides
+        if train_peptides is not None
+        else math.ceil(len(ordered) * train_fraction)
+    )
+    selected = set(ordered[:count])
+    logging.info(f"Training groups retained: {len(selected)} of {len(candidates)}")
+    return selected
 
 
 def _write_peptides_txt(
@@ -163,6 +233,7 @@ def _sampling_key(spectrum: dict) -> tuple[str, tuple]:
 
 def _collect_peptide_counts(
     mgf_files: tuple[PathLike, ...],
+    backbone_groups: Optional[_BackboneGroups] = None,
 ) -> tuple[dict[str, int], dict[tuple, int], int]:
     """Pass 1: stream all input MGF files and count spectra per peptide.
 
@@ -205,6 +276,8 @@ def _collect_peptide_counts(
                         f"{spectrum_index} in file {mgf_file}"
                     ) from exc
                 raw_seqs.add(seq)
+                if backbone_groups is not None:
+                    backbone_groups.add(seq)
                 pep_key = _canonical(seq)
                 pep_counts[pep_key] = pep_counts.get(pep_key, 0) + 1
                 samp_key = _sampling_key(spectrum)
@@ -231,6 +304,7 @@ def _assign_splits(
     total_spectra: int,
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     spectra_per_precursor: Optional[int],
+    peptide_groups: Optional[dict[str, str]] = None,
 ) -> tuple[dict[str, str], dict[tuple, set[int]], dict[str, set[str]]]:
     """Compute per-peptide split assignments and sampling indices.
 
@@ -326,7 +400,10 @@ def _assign_splits(
                             f"(e.g. sequence {seq!r}). "
                             f"existing_splits must be in ProForma format."
                         )
-                    existing_peps[split_name].add(_canonical(seq))
+                    canonical = _canonical(seq)
+                    existing_peps[split_name].add(
+                        peptide_groups[canonical] if peptide_groups else canonical
+                    )
             logging.info(
                 f"Existing {split_name}: "
                 f"{len(existing_peps[split_name])} peptide"
@@ -487,6 +564,8 @@ def _write_splits(
     spectra_per_precursor: Optional[int],
     existing_splits: Optional[tuple[PathLike, PathLike, PathLike]],
     combine_with_existing: bool,
+    peptide_groups: Optional[dict[str, str]] = None,
+    train_peptides: Optional[set[str]] = None,
 ) -> tuple[dict[str, int], dict[str, set[str]], dict[str, dict[str, str]]]:
     """Pass 2: stream spectra to output MGF files.
 
@@ -523,6 +602,8 @@ def _write_splits(
         split: {pep for pep, s in pep_to_split.items() if s == split}
         for split in ("train", "val", "test")
     }
+    if train_peptides is not None:
+        split_pep_sets["train"] &= train_peptides
 
     outfiles = {
         split: f"{output_root}.{split}.mgf" for split in ("train", "val", "test")
@@ -568,8 +649,18 @@ def _write_splits(
         def write_spectrum(split_name: str, spectrum: dict) -> None:
             """Buffer a spectrum, track its sequence, and flush when full."""
             seq = spectrum["params"].get("seq")
+            canonical = _canonical(seq)
+            group = peptide_groups[canonical] if peptide_groups else canonical
+            if (
+                split_name == "train"
+                and train_peptides is not None
+                and group not in train_peptides
+            ):
+                return
             if seq and seq not in mod_to_bare_by_split[split_name]:
-                mod_to_bare_by_split[split_name][seq] = _strip_mods(_canonical(seq))
+                mod_to_bare_by_split[split_name][seq] = (
+                    group if peptide_groups else _strip_mods(canonical)
+                )
             buffers[split_name].append(spectrum)
             split_spectra_counts[split_name] += 1
             if len(buffers[split_name]) >= _WRITE_BUFFER_SIZE:
@@ -599,7 +690,8 @@ def _write_splits(
                     unit="PSM",
                 ):
                     seq = spectrum["params"]["seq"]
-                    pep_key = _canonical(seq)
+                    canonical = _canonical(seq)
+                    pep_key = peptide_groups[canonical] if peptide_groups else canonical
                     samp_key = _sampling_key(spectrum)
 
                     # Apply spectra_per_precursor filtering per (peptide, charge).
@@ -715,6 +807,9 @@ def create_datasets(
     mskb_format: bool = False,
     casanovo_config: Optional[PathLike] = None,
     tmp_dir: Optional[PathLike] = None,
+    group_by_backbone: bool = False,
+    train_fraction: float = 1.0,
+    train_peptides: Optional[int] = None,
 ) -> None:
     """Create peptide-level train/validation/test splits from annotated MGF files.
 
@@ -796,9 +891,41 @@ def create_datasets(
         Defaults to the system temporary directory (usually ``/tmp``). Set
         this to a directory on a volume with sufficient free space when
         processing large MGF files.
+    group_by_backbone : bool, default=False
+        Keep all modification variants of an I/L-collapsed backbone in one
+        split. Canonical mass-equivalence links (including deamidation) are
+        joined transitively with backbone links. Conflicting existing splits
+        raise an error. Original labels are preserved; column 2 of each
+        peptides.txt file is the connected group's backbone representative.
+    train_fraction : float, default=1.0
+        Fraction of training groups to retain, rounded up. Groups are ranked
+        by a seed-dependent hash, so smaller fractions are nested subsets.
+        Validation/test assignment and spectra are unchanged. With
+        combine_with_existing, this also subsamples existing training groups.
+    train_peptides : int, optional
+        Retain at most this many training groups, using the same nested
+        hash-ranked prefix as train_fraction. Requires train_fraction=1.
+        With group_by_backbone, a group joins backbone and canonical mass
+        aliases; otherwise it is a canonical modified peptide. All spectra
+        of selected groups remain subject to spectra_per_precursor.
     """
     if not mgf_files:
         raise ValueError("At least one MGF file must be provided.")
+    if (
+        isinstance(train_fraction, bool)
+        or not math.isfinite(train_fraction)
+        or not 0 < train_fraction <= 1
+    ):
+        raise ValueError("train_fraction must be finite and in (0, 1].")
+    if train_peptides is not None:
+        if (
+            isinstance(train_peptides, bool)
+            or not isinstance(train_peptides, int)
+            or train_peptides <= 0
+        ):
+            raise ValueError("train_peptides must be a positive integer.")
+        if train_fraction != 1:
+            raise ValueError("train_peptides requires train_fraction=1.")
 
     if spectra_per_precursor is not None and spectra_per_precursor <= 0:
         raise ValueError(
@@ -853,9 +980,25 @@ def create_datasets(
             if casanovo_config is not None:
                 mgf_files = _filter_mgf_files(mgf_files, casanovo_config, tmp)
 
+            groups = _BackboneGroups() if group_by_backbone else None
             pep_counts, sampling_counts, total_spectra = _collect_peptide_counts(
-                mgf_files
+                mgf_files, groups
             )
+            peptide_groups = None
+            if groups is not None:
+                # Include existing sequences before resolving components:
+                # a new mass-equivalent variant can connect old backbones.
+                for split_path in existing_splits or ():
+                    with pyteomics.mgf.read(str(split_path), use_index=False) as reader:
+                        for spectrum in reader:
+                            groups.add(spectrum["params"]["seq"])
+                peptide_groups = groups.keys()
+                grouped_counts: dict[str, int] = {}
+                for canonical, count in pep_counts.items():
+                    key = peptide_groups[canonical]
+                    grouped_counts[key] = grouped_counts.get(key, 0) + count
+                pep_counts = grouped_counts
+                logging.info(f"Backbone/mass-equivalence components: {len(pep_counts)}")
 
             pep_to_split, sampled_indices, existing_peps = _assign_splits(
                 pep_counts,
@@ -863,7 +1006,18 @@ def create_datasets(
                 total_spectra,
                 existing_splits,
                 spectra_per_precursor,
+                peptide_groups,
             )
+
+            selected_train = None
+            if train_fraction < 1 or train_peptides is not None:
+                selected_train = _select_train_peptides(
+                    pep_to_split,
+                    existing_peps["train"] if combine_with_existing else set(),
+                    random_seed,
+                    train_fraction,
+                    train_peptides,
+                )
 
             split_spectra_counts, split_pep_sets, mod_to_bare_by_split = _write_splits(
                 mgf_files,
@@ -873,7 +1027,11 @@ def create_datasets(
                 spectra_per_precursor,
                 existing_splits,
                 combine_with_existing,
+                peptide_groups,
+                selected_train,
             )
+            if combine_with_existing and selected_train is not None:
+                existing_peps["train"] &= selected_train
 
         # Log split summaries.
         for split_name in ("train", "val", "test"):
